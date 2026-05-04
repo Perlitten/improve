@@ -1,0 +1,9 @@
+[Unit]
+Description=Render Hermes host infrastructure snapshot
+After=network-online.target docker.service n8n.service nginx.service hermes-gateway.service hermes-dashboard.service automation-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/render_infra_snapshot.py
+

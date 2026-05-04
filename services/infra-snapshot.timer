@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Hermes host infrastructure snapshot every 5 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Unit=infra-snapshot.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

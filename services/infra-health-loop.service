@@ -1,0 +1,10 @@
+[Unit]
+Description=Hermes host health and optimization loop
+After=network-online.target infra-snapshot.service n8n.service nginx.service hermes-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/systemctl start infra-snapshot.service
+ExecStart=/usr/bin/python3 /usr/local/bin/health_optimization_loop.py
+

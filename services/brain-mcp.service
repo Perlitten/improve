@@ -1,0 +1,21 @@
+[Unit]
+Description=Career Odyssey MCP Control Plane
+After=network-online.target docker.service n8n.service automation-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=Bilirubin
+Group=Bilirubin
+WorkingDirectory=/srv/automation/bin
+Environment=HOME=/home/Bilirubin
+Environment=HERMES_HOME=/home/Bilirubin/.hermes
+Environment=PATH=/home/Bilirubin/.hermes/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/Bilirubin/.hermes/venv/bin/fastmcp run /srv/automation/bin/brain_mcp_server.py:mcp --transport http --host 127.0.0.1 --port 8791 --path /mcp/ --no-banner
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

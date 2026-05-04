@@ -1,0 +1,19 @@
+[Unit]
+Description=Hermes self-monitoring and remediation via MCP
+After=network-online.target brain-mcp.service hermes-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=Bilirubin
+Group=Bilirubin
+WorkingDirectory=/home/Bilirubin/workspace
+Environment=HOME=/home/Bilirubin
+Environment=HERMES_HOME=/home/Bilirubin/.hermes
+Environment=PATH=/home/Bilirubin/.hermes/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/Bilirubin/.hermes/venv/bin/hermes run \
+  --workspace /home/Bilirubin/workspace \
+  --no-interactive \
+  "Self-monitoring check: call mcp_control_plane_infra_readiness, then mcp_control_plane_provider_health_check. If any service is inactive, call mcp_control_plane_service_logs for that service. If any provider is failing, call mcp_control_plane_memory_record_observation with title='provider_failure' and details. Summarize findings and write a single observation via mcp_control_plane_memory_record_observation with title='self_monitor_report'. Do not ask questions."
+StandardOutput=journal
+StandardError=journal

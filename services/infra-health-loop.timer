@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Hermes host health and optimization loop every 15 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+Unit=infra-health-loop.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

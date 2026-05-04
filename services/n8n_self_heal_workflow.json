@@ -1,0 +1,177 @@
+{
+  "name": "Self-Healing Loop",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 15 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8791/mcp/",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "tools/call",
+          "params": { "name": "infra_readiness", "arguments": {} }
+        },
+        "options": { "timeout": 15000 }
+      },
+      "id": "mcp-readiness",
+      "name": "MCP: infra_readiness",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8791/mcp/",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "method": "tools/call",
+          "params": { "name": "provider_health_check", "arguments": {} }
+        },
+        "options": { "timeout": 30000 }
+      },
+      "id": "mcp-providers",
+      "name": "MCP: provider_health_check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const readiness = $('MCP: infra_readiness').item.json?.result?.content?.[0];\nconst providers = $('MCP: provider_health_check').item.json?.result?.content?.[0];\n\nlet infra = {};\nlet prov = {};\ntry { infra = JSON.parse(readiness?.text || '{}'); } catch {}\ntry { prov = JSON.parse(providers?.text || '{}'); } catch {}\n\nconst downServices = Object.entries(infra.services || {})\n  .filter(([, v]) => v !== 'active')\n  .map(([k]) => k);\n\nconst failingProviders = prov.failing_providers || [];\n\nconst healthy = downServices.length === 0 && failingProviders.length === 0;\n\nreturn [{ json: { healthy, downServices, failingProviders, infra, prov } }];"
+      },
+      "id": "evaluate",
+      "name": "Evaluate Health",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [{ "value1": "={{ $json.healthy }}", "value2": false }]
+        }
+      },
+      "id": "is-unhealthy",
+      "name": "Problems found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8791/mcp/",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "method": "tools/call",
+          "params": {
+            "name": "memory_record_observation",
+            "arguments": {
+              "title": "self_heal_alert",
+              "content": "={{ 'Down services: ' + $json.downServices.join(', ') + '. Failing providers: ' + $json.failingProviders.join(', ') }}",
+              "kind": "self_heal_alert",
+              "severity": "warn"
+            }
+          }
+        },
+        "options": { "timeout": 10000 }
+      },
+      "id": "record-problem",
+      "name": "Record to Memory",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8791/mcp/",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "method": "tools/call",
+          "params": {
+            "name": "orchestrate_tasks",
+            "arguments": {
+              "objective": "Fix detected infrastructure problems",
+              "tasks": [
+                "={{ $json.downServices.length > 0 ? 'Restart inactive services: ' + $json.downServices.join(', ') : null }}",
+                "={{ $json.failingProviders.length > 0 ? 'Provider health issue detected: ' + $json.failingProviders.join(', ') + ' is unreachable. Record observation and suggest model switch.' : null }}"
+              ],
+              "collection": "self-heal-actions",
+              "store_to_rag": true,
+              "max_concurrency": 1
+            }
+          }
+        },
+        "options": { "timeout": 120000 }
+      },
+      "id": "orchestrate-fix",
+      "name": "Orchestrate Fix",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 380]
+    },
+    {
+      "parameters": {
+        "url": "http://127.0.0.1:8791/mcp/",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 5,
+          "method": "tools/call",
+          "params": {
+            "name": "memory_record_observation",
+            "arguments": {
+              "title": "self_monitor_ok",
+              "content": "={{ 'All systems healthy at ' + new Date().toISOString() }}",
+              "kind": "self_monitor_ok",
+              "severity": "info"
+            }
+          }
+        },
+        "options": { "timeout": 10000 }
+      },
+      "id": "record-ok",
+      "name": "Record OK",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 560]
+    }
+  ],
+  "connections": {
+    "Every 15 min":          { "main": [[{ "node": "MCP: infra_readiness",      "type": "main", "index": 0 }]] },
+    "MCP: infra_readiness":  { "main": [[{ "node": "MCP: provider_health_check","type": "main", "index": 0 }]] },
+    "MCP: provider_health_check": { "main": [[{ "node": "Evaluate Health",      "type": "main", "index": 0 }]] },
+    "Evaluate Health":       { "main": [[{ "node": "Problems found?",           "type": "main", "index": 0 }]] },
+    "Problems found?":       {
+      "main": [
+        [{ "node": "Record to Memory", "type": "main", "index": 0 }],
+        [{ "node": "Record OK",        "type": "main", "index": 0 }]
+      ]
+    },
+    "Record to Memory":      { "main": [[{ "node": "Orchestrate Fix",           "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

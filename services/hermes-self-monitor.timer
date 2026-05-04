@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Hermes self-monitor every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=hermes-self-monitor.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

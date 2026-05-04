@@ -1,0 +1,78 @@
+{
+  "registry": {
+    "anthropic/claude-sonnet-4": {
+      "provider": "openrouter",
+      "supports_tools": true,
+      "supports_parallel_tool_calls": true,
+      "max_context": 200000,
+      "recommended_for": ["planning", "tool_use", "long_context"],
+      "disabled_for": [],
+      "cost_tier": "paid",
+      "min_credits_required": 1.5
+    },
+    "anthropic/claude-3.5-sonnet": {
+      "provider": "openrouter",
+      "supports_tools": true,
+      "supports_parallel_tool_calls": true,
+      "max_context": 200000,
+      "recommended_for": ["planning", "tool_use"],
+      "disabled_for": [],
+      "cost_tier": "paid",
+      "min_credits_required": 0.5
+    },
+    "nvidia/nemotron-3-super-120b-a12b:free": {
+      "provider": "openrouter",
+      "supports_tools": true,
+      "supports_parallel_tool_calls": true,
+      "max_context": 32000,
+      "recommended_for": ["tool_use", "fallback"],
+      "disabled_for": [],
+      "cost_tier": "free"
+    },
+    "google/gemma-4-26b-a4b-it:free": {
+      "provider": "openrouter",
+      "supports_tools": true,
+      "supports_parallel_tool_calls": true,
+      "max_context": 8000,
+      "recommended_for": ["tool_use", "fallback"],
+      "disabled_for": [],
+      "cost_tier": "free"
+    },
+    "nvidia/meta/llama-3.3-70b-instruct": {
+      "provider": "nvidia",
+      "supports_tools": true,
+      "supports_parallel_tool_calls": false,
+      "max_context": 128000,
+      "recommended_for": ["summarization", "planning"],
+      "disabled_for": ["tool_heavy", "multi_tool"],
+      "cost_tier": "free",
+      "single_tool_mode_required": true,
+      "single_tool_only": true
+    },
+    "nvidia/meta/llama-3.1-405b-instruct": {
+      "provider": "nvidia",
+      "supports_tools": true,
+      "supports_parallel_tool_calls": false,
+      "max_context": 128000,
+      "recommended_for": ["planning"],
+      "disabled_for": ["tool_heavy", "multi_tool"],
+      "cost_tier": "free",
+      "single_tool_mode_required": true,
+      "single_tool_only": true
+    }
+  },
+  "task_requirements": {
+    "tool_heavy": {
+      "requires": ["supports_tools", "supports_parallel_tool_calls"]
+    },
+    "multi_tool": {
+      "requires": ["supports_parallel_tool_calls"]
+    },
+    "planning": {
+      "requires": []
+    },
+    "summarization": {
+      "requires": []
+    }
+  }
+}
