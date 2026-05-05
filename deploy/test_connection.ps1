@@ -11,11 +11,8 @@ param(
     [string]$ServerPath = "/home/Bilirubin/workspace"
 )
 
-# Repo root is one level up from script
-$repoRoot = (Get-Item $PSScriptRoot).Parent.FullName
-
 # Load config
-$configPath = Join-Path $repoRoot ".deploy-config"
+$configPath = Join-Path $PSScriptRoot ".deploy-config"
 if (Test-Path $configPath) {
     $config = Get-Content $configPath -Raw | ConvertFrom-Json
     if (-not $ServerHost) { $ServerHost = $config.server_host }
@@ -83,4 +80,4 @@ Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  - Sync files:     .\sync_to_server.ps1" -ForegroundColor White
 Write-Host "  - Quick command:  .\quick_fix.ps1 -ShowLogs" -ForegroundColor White
-Write-Host "  - Read guide:     Get-Content docs/hermes-recovery/DEPLOY_README.md" -ForegroundColor White
+Write-Host "  - Read guide:     Get-Content DEPLOY_README.md" -ForegroundColor White

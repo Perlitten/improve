@@ -32,3 +32,6 @@ Thumbs.db
 *.tmp
 *.bak
 ~*
+
+# Deployment temp bundles
+sync_bundle_*.tar.gz

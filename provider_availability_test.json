@@ -1,0 +1,22 @@
+{
+  "openrouter_free": {
+    "status": "✅ OK",
+    "latency_ms": 1817,
+    "error": null
+  },
+  "nvidia_nim": {
+    "status": "✅ OK",
+    "latency_ms": 5139,
+    "error": null
+  },
+  "longcat": {
+    "status": "❌ Failed",
+    "latency_ms": null,
+    "error": "000"
+  },
+  "pollinations": {
+    "status": "✅ OK",
+    "latency_ms": 943,
+    "error": null
+  }
+}
