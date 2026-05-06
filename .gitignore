@@ -35,3 +35,20 @@ Thumbs.db
 
 # Deployment temp bundles
 sync_bundle_*.tar.gz
+
+# Python cache
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+
+# Temp files
+temp/
+*.tmp
+
+# Reports (keep in temp/)
+reports/*.json
+
+# Test coverage
+.coverage
+htmlcov/
