@@ -1,0 +1,94 @@
+# Hermes Unified Configuration
+# Single source of truth for all settings
+# Copy to ~/.hermes/config.yaml and set environment variables
+
+hermes:
+  home: /home/Bilirubin/.hermes
+  log_level: INFO
+  workspace: /home/Bilirubin/workspace/hermes
+
+# Database configuration
+database:
+  host: 127.0.0.1
+  port: 5432
+  name: rag
+  user: ${POSTGRES_USER}
+  password: ${POSTGRES_PASSWORD}
+
+# Provider configuration
+providers:
+  openrouter:
+    api_key: ${OPENROUTER_API_KEY}
+    base_url: https://openrouter.ai/api/v1
+    timeout: 60
+    max_retries: 3
+  
+  nvidia:
+    api_key: ${NVIDIA_API_KEY}
+    base_url: https://integrate.api.nvidia.com/v1
+    timeout: 60
+    max_retries: 3
+
+# Model configuration
+models:
+  primary:
+    model: anthropic/claude-sonnet-4
+    provider: openrouter
+    max_cost_per_task: 0.50
+    max_tokens: 200000
+  
+  fallback:
+    - model: nvidia/nemotron-3-super-120b-a12b:free
+      provider: openrouter
+      max_cost_per_task: 0.00
+      max_tokens: 32000
+    
+    - model: meta/llama-3.3-70b-instruct
+      provider: nvidia
+      max_cost_per_task: 0.00
+      max_tokens: 128000
+
+# Task queue configuration
+task_queue:
+  max_concurrent: 2
+  checkpoint_interval: 60
+  default_priority: 5
+  max_retries: 3
+
+# Cost tracking
+cost_tracking:
+  enabled: true
+  daily_budget: 10.00
+  alert_threshold: 0.80
+
+# Memory configuration
+memory:
+  vector_db: postgres
+  embedding_model: text-embedding-3-small
+  chunk_size: 1000
+  chunk_overlap: 200
+
+# n8n integration
+n8n:
+  enabled: true
+  base_url: http://localhost:5678
+  webhook_base: http://localhost:5678/webhook
+
+# Telegram Role-Based Access Control
+telegram:
+  admin_users: [] # List of Telegram User IDs with full access
+  guest_users: [] # List of Telegram User IDs with restricted access (search, read_url, reminders only)
+
+
+# Monitoring
+monitoring:
+  prometheus_port: 9090
+  metrics_enabled: true
+  health_check_interval: 60
+
+# Logging
+logging:
+  level: INFO
+  format: json
+  rotation: daily
+  retention_days: 30

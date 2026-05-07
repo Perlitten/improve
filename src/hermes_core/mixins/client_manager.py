@@ -8,6 +8,7 @@ import threading
 from typing import Any, Optional, Dict, List, Tuple
 from hermes_core.network import OpenAI, _get_proxy_from_env, _pool_may_recover_from_rate_limit
 from hermes_core.utils import _is_destructive_command
+from agent.error_classifier import FailoverReason
 
 logger = logging.getLogger(__name__)
 

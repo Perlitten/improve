@@ -17,25 +17,18 @@ HERMES_ENV = Path("/home/Bilirubin/.hermes/.env")
 HERMES_CONFIG = Path("/home/Bilirubin/.hermes/config.yaml")
 SERVICES = ["hermes-gateway", "hermes-dashboard", "n8n", "automation-gateway", "brain-mcp", "nginx", "docker"]
 
-# Model tiers — ordered best-to-worst.
-# provider: "openrouter" = paid credits required; "nvidia" = free NVIDIA NIM.
+# Model tiers — ordered by default runtime preference.
+# Keep free NVIDIA models primary; paid OpenRouter is reserved for explicit
+# serious/delegated work, not routine auto-upgrades.
 MODEL_TIERS = [
-    # ── Paid (OpenRouter) ───────────────────────────────────────────────────
-    {"label": "claude-sonnet-4.6",  "model": "anthropic/claude-sonnet-4-6",                "provider": "openrouter_paid", "min_credits": 1.5},
-    {"label": "claude-3.5-sonnet",  "model": "anthropic/claude-3.5-sonnet",                "provider": "openrouter_paid", "min_credits": 0.5},
-    # ── Free via OpenRouter (no credits needed, separate rate-limit pools) ──
-    # Confirmed tool-call support:
-    {"label": "nemotron-or-free",   "model": "nvidia/nemotron-3-super-120b-a12b:free",     "provider": "openrouter_free", "min_credits": 0},
-    {"label": "gemma4-26b-free",    "model": "google/gemma-4-26b-a4b-it:free",             "provider": "openrouter_free", "min_credits": 0},
-    # Larger free models (popular — may hit 429, retry handles it):
-    {"label": "gemma4-31b-free",    "model": "google/gemma-4-31b-it:free",                 "provider": "openrouter_free", "min_credits": 0},
-    {"label": "qwen3-80b-free",     "model": "qwen/qwen3-next-80b-a3b-instruct:free",      "provider": "openrouter_free", "min_credits": 0},
-    {"label": "llama3.3-70b-free",  "model": "meta-llama/llama-3.3-70b-instruct:free",     "provider": "openrouter_free", "min_credits": 0},
-    # ── Free via NVIDIA direct (different API, different rate limits) ───────
+    # ── Free primary path ───────────────────────────────────────────────────
+    {"label": "qwen3-80b-nvidia",   "model": "qwen/qwen3-next-80b-a3b-instruct",           "provider": "nvidia",          "min_credits": 0},
     {"label": "nemotron-120b",      "model": "nvidia/nemotron-3-super-120b-a12b",          "provider": "nvidia",          "min_credits": 0},
-    {"label": "llama3.1-405b",      "model": "meta/llama-3.1-405b-instruct",               "provider": "nvidia",          "min_credits": 0},
-    # ── Last resort ─────────────────────────────────────────────────────────
     {"label": "llama3.1-70b",       "model": "meta/llama-3.1-70b-instruct",                "provider": "nvidia",          "min_credits": 0},
+    # ── OpenRouter fallback/delegation path ─────────────────────────────────
+    {"label": "nemotron-or-free",   "model": "nvidia/nemotron-3-super-120b-a12b:free",     "provider": "openrouter_free", "min_credits": 0},
+    {"label": "deepseek-v4-flash",  "model": "deepseek/deepseek-v4-flash",                "provider": "openrouter_paid", "min_credits": 0},
+    {"label": "claude-sonnet-4",    "model": "anthropic/claude-sonnet-4",                  "provider": "openrouter_paid", "min_credits": 0.5},
 ]
 
 
@@ -100,7 +93,9 @@ def collect_provider_health(hermes_env: dict) -> dict:
         # 402 in recent logs means we burned through credits — mark as unaffordable immediately
         has_402 = _gateway_has_recent_402()
         remaining = info.get("remaining_usd")
-        # If limit=None (no hard cap set), only mark unaffordable when we see a real 402
+        # OpenRouter may omit remaining balance when no hard cap is configured.
+        # The runtime caps OpenRouter output tokens, so a valid key with no
+        # recent 402 is usable; a real 402 still forces downgrade immediately.
         affordable = info.get("ok") and not has_402 and (remaining is None or remaining >= 0.5)
         results["openrouter"] = {**info, "affordable": affordable, "recent_402": has_402}
     if hermes_env.get("NVIDIA_API_KEY"):
@@ -116,22 +111,65 @@ def collect_provider_health(hermes_env: dict) -> dict:
 
 def _get_current_model() -> str:
     try:
-        for line in HERMES_CONFIG.read_text(encoding="utf-8").splitlines():
+        file_lines = HERMES_CONFIG.read_text(encoding="utf-8").splitlines()
+        for idx, line in enumerate(file_lines):
             if not line.startswith((" ", "\t")) and line.startswith("model:"):
+                val = line.split(":", 1)[1].strip()
+                if val:
+                    return val
+                if idx + 1 < len(file_lines):
+                    sub = file_lines[idx + 1].strip()
+                    if sub.startswith("default:"):
+                        return sub.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _get_current_provider() -> str:
+    try:
+        file_lines = HERMES_CONFIG.read_text(encoding="utf-8").splitlines()
+        in_model = False
+        for line in file_lines:
+            if not line.startswith((" ", "\t")):
+                in_model = line.startswith("model:")
+                continue
+            if in_model and line.strip().startswith("provider:"):
                 return line.split(":", 1)[1].strip()
     except Exception:
         pass
     return ""
 
 
-def _write_model_to_config(new_model: str) -> bool:
+def _runtime_provider(tier_provider: str) -> str:
+    if tier_provider in {"openrouter_paid", "openrouter_free"}:
+        return "openrouter"
+    return tier_provider
+
+
+def _write_model_to_config(new_model: str, provider: str) -> bool:
     try:
         text = HERMES_CONFIG.read_text(encoding="utf-8")
         lines = text.splitlines()
-        new_lines = [
-            f"model: {new_model}" if (not ln.startswith((" ", "\t")) and ln.startswith("model:")) else ln
-            for ln in lines
-        ]
+        new_lines = []
+        skip_children = False
+        wrote_model = False
+        for line in lines:
+            if not line.startswith((" ", "\t")) and line.startswith("model:"):
+                new_lines.append("model:")
+                new_lines.append(f"  default: {new_model}")
+                new_lines.append(f"  provider: {provider}")
+                skip_children = True
+                wrote_model = True
+            elif skip_children and line.startswith((" ", "\t")):
+                continue
+            else:
+                skip_children = False
+                new_lines.append(line)
+        if not wrote_model:
+            new_lines.insert(0, f"  provider: {provider}")
+            new_lines.insert(0, f"  default: {new_model}")
+            new_lines.insert(0, "model:")
         HERMES_CONFIG.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
         return True
     except Exception as exc:
@@ -169,27 +207,35 @@ def apply_model_selection(providers: dict, pg_env: dict) -> dict:
     """Pick best model, update config if changed, restart gateway if degrading."""
     best = select_optimal_model(providers)
     current = _get_current_model()
-    result = {"tier": best["label"], "model": best["model"], "previous": current, "changed": False}
+    provider = _runtime_provider(best["provider"])
+    current_provider = _get_current_provider()
+    result = {
+        "tier": best["label"],
+        "model": best["model"],
+        "provider": provider,
+        "previous": current,
+        "previous_provider": current_provider,
+        "changed": False,
+    }
 
-    if best["model"] == current:
+    if best["model"] == current and provider == current_provider:
         return result
 
-    if not _write_model_to_config(best["model"]):
+    if not _write_model_to_config(best["model"], provider):
         result["error"] = "config write failed"
         return result
 
     result["changed"] = True
 
-    # Determine if this is a downgrade (from paid → free) or upgrade (free → paid)
+    # Track switch direction for the audit event.
     current_tier_idx = next((i for i, t in enumerate(MODEL_TIERS) if t["model"] == current), 999)
     new_tier_idx = next((i for i, t in enumerate(MODEL_TIERS) if t["model"] == best["model"]), 999)
     is_downgrade = new_tier_idx > current_tier_idx
 
-    # Restart gateway on downgrade — the current model is broken (402/unavailable)
-    # On upgrade — just write config; next natural restart picks it up (avoids interrupting sessions)
-    if is_downgrade:
-        run("sudo", "systemctl", "restart", "hermes-gateway")
-        result["restarted"] = True
+    # Config writes are not enough: the gateway keeps provider/model state in process.
+    # Restart on every model switch to avoid config/runtime drift.
+    run("sudo", "systemctl", "restart", "hermes-gateway")
+    result["restarted"] = True
 
     # Persist switch event
     now = datetime.now(timezone.utc)
@@ -232,6 +278,31 @@ def read_env(path: Path):
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip()
     return values
+
+
+def load_postgres_env() -> dict:
+    """Load Postgres credentials without requiring them in world-readable .env."""
+    pg = read_env(AUTOMATION_ENV)
+    pg.setdefault("POSTGRES_USER", os.getenv("POSTGRES_USER", ""))
+    pg.setdefault("POSTGRES_PASSWORD", os.getenv("POSTGRES_PASSWORD", ""))
+
+    if pg.get("POSTGRES_USER") and pg.get("POSTGRES_PASSWORD"):
+        return pg
+
+    rc, output, _ = run("sudo", "docker", "exec", "automation-postgres", "env")
+    if rc == 0:
+        for line in output.splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key in {"POSTGRES_USER", "POSTGRES_PASSWORD"} and value:
+                pg[key] = value
+
+    missing = [key for key in ("POSTGRES_USER", "POSTGRES_PASSWORD") if not pg.get(key)]
+    if missing:
+        raise RuntimeError(f"Missing Postgres credential(s): {', '.join(missing)}")
+
+    return pg
 
 
 def http_get(url: str):
@@ -280,7 +351,7 @@ def collect_status(snapshot):
     status["endpoints"]["hermes_api_ping"] = http_get("http://127.0.0.1:8642/health")
     status["endpoints"]["dashboard"] = http_get("http://127.0.0.1:9119")
 
-    pg = read_env(AUTOMATION_ENV)
+    pg = load_postgres_env()
     conn = psycopg2.connect(
         host="127.0.0.1",
         port=5432,
@@ -513,6 +584,7 @@ def persist_report(status, severity, recommendations, summary, pg_env):
                 project_name="Hermes Server",
                 artifact_slug="host-optimization-latest",
                 title="host-optimization",
+                version=1,
                 artifact_kind="host_optimization",
                 source_kind="system",
                 source_uri="latest",

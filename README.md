@@ -1,262 +1,457 @@
-# 🤖 Hermes Infrastructure Workspace
+# 🤖 Hermes — AI Agent Infrastructure
 
-Автономная инфраструктура для AI-агентов с долговременной памятью, автоматическим мониторингом и самовосстановлением.
+Autonomous infrastructure for AI agents with long-term memory, automatic monitoring, and self-healing capabilities.
 
-## 🏗️ Архитектура
+## 🏗️ Architecture
 
-### Основные компоненты
+### Core Components
 
-- **Hermes** — агентская платформа (gateway + dashboard)
-- **n8n** — workflow automation
-- **PostgreSQL** — долговременная память (БД `rag`)
-- **Brain MCP** — control plane для агентов (порт 8791)
-- **Knowledge Optimizer** — система для работы с Obsidian vault
-- **Мониторинг** — автоматические health checks и оптимизация
+- **Hermes Gateway** (port 8642) — Agent API and request handling
+- **Hermes Dashboard** (port 9119) — Web UI for monitoring
+- **Brain MCP** (port 8791) — Model Context Protocol control plane
+- **n8n** (port 5678) — Workflow automation engine
+- **PostgreSQL** — Long-term memory (database `rag`)
+- **Monitoring** — Automatic health checks and self-healing
 
-### Сервисы
+### Services
 
-| Сервис | Порт | Назначение |
-|--------|------|-----------|
-| `hermes-gateway` | 8642 | API для агентов |
+| Service | Port | Purpose |
+|---------|------|---------|
+| `hermes-gateway` | 8642 | Agent API |
 | `hermes-dashboard` | 9119 | Web UI |
+| `brain-mcp` | 8791 | MCP control plane |
 | `n8n` | 5678 | Workflow automation |
 | `automation-gateway` | 8788 | Orchestration webhooks |
-| `brain-mcp` | 8791 | MCP control plane |
 | `nginx` | 80/443 | Reverse proxy |
 
-## 🚀 Deployment
+---
 
-### Быстрый старт
+## 📁 Project Structure
+
+```
+hermes/
+├── src/                     # Core source code
+│   ├── hermes_core/         # Main Hermes implementation
+│   ├── brain_mcp_server.py  # MCP server
+│   ├── model_router.py      # Provider routing
+│   ├── canonical_memory.py  # Memory management
+│   └── *.sh                 # Server-side scripts
+│
+├── deploy/                  # Deployment tools
+│   ├── sync_to_server.ps1   # Direct file sync (recommended)
+│   ├── deploy_to_server.ps1 # Git-based deployment
+│   ├── quick_fix.ps1        # Quick server commands
+│   ├── test_connection.ps1  # Connection testing
+│   └── .deploy-config       # Server credentials (not in Git)
+│
+├── docs/                    # Documentation
+│   ├── hermes-recovery/     # Recovery guides
+│   ├── architecture/        # Architecture docs
+│   └── history/             # Completed phases
+│
+├── services/                # Systemd service files
+│   ├── *.service            # Service definitions
+│   ├── *.timer              # Timer definitions
+│   └── prometheus.yml       # Monitoring config
+│
+├── config/                  # Configuration files
+│   ├── model_capabilities.json  # Model capabilities
+│   └── soul_append.txt          # Agent personality
+│
+├── scripts/                 # Executable scripts
+│   └── run_agent.py         # Agent runner
+│
+├── tools/                   # Development utilities
+│   ├── extract.py           # Code extraction
+│   ├── token_usage_analysis.py  # Token analysis
+│   └── *.py                 # Other utilities
+│
+├── reports/                 # Status reports
+│   └── *.md                 # Phase completion reports
+│
+├── nim/                     # NIM orchestrator (experimental)
+│   └── nim_orchestrator.py  # Multi-agent orchestration
+│
+├── temp/                    # Temporary files (not in Git)
+│   └── *.json               # Test results, analysis
+│
+├── hermes_constants.py      # Global constants
+├── utils.py                 # Shared utilities
+├── .hermes.md               # Agent instructions
+└── README.md                # This file
+```
+
+---
+
+## 🚀 Quick Start
+
+### 1. Configure Deployment
 
 ```powershell
-# 1. Настройка деплоя (один раз)
-.\setup_deploy.ps1
-
-# 2. Деплой изменений
-.\deploy_to_server.ps1
-
-# 3. Проверка состояния
-.\quick_fix.ps1 -ShowLogs
+# Edit server connection details
+notepad deploy\.deploy-config
 ```
 
-### Документация по деплою
+Update with your server details:
+```json
+{
+    "server_host": "user@your-server-ip",
+    "server_path": "/home/user/workspace",
+    "server_user": "user"
+}
+```
 
-- **📋 Быстрая шпаргалка:** [DEPLOY_CHEATSHEET.md](DEPLOY_CHEATSHEET.md)
-- **📚 Полная документация:** [DEPLOY_README.md](DEPLOY_README.md)
-- **📝 Обзор системы:** [DEPLOY_SUMMARY.md](DEPLOY_SUMMARY.md)
-
-## 🔧 Основные скрипты
-
-### Деплой и синхронизация
+### 2. Deploy to Server
 
 ```powershell
-# Интерактивная настройка
-.\setup_deploy.ps1
+# Direct file sync (recommended)
+.\deploy\sync_to_server.ps1
 
-# Проверка подключения
-.\test_connection.ps1
-
-# Деплой через Git
-.\deploy_to_server.ps1 -Message "Fix bug"
-
-# Прямая синхронизация файлов
-.\sync_to_server.ps1
-
-# Быстрая команда на сервере
-.\quick_fix.ps1 -Command "sudo systemctl restart brain-mcp"
-
-# Просмотр логов
-.\quick_fix.ps1 -ShowLogs
+# Or Git-based deployment
+.\deploy\deploy_to_server.ps1 -Message "Initial deployment"
 ```
 
-### Диагностика на сервере
+### 3. Verify Deployment
 
-```bash
-# Проверка состояния хоста
-/home/Bilirubin/workspace/host_checklist.sh
+```powershell
+# Test connection
+.\deploy\test_connection.ps1
 
-# Проверка базы данных
-/home/Bilirubin/workspace/db_checklist.sh
+# Check service status
+.\deploy\quick_fix.ps1 -ShowLogs
 
-# Проверка готовности агента
-/home/Bilirubin/workspace/agent_readiness_check.sh
+# Check health
+.\deploy\quick_fix.ps1 -Command "/home/Bilirubin/workspace/host_checklist.sh"
 ```
 
-## 📊 Мониторинг
+---
 
-### Автоматические проверки
+## 🔧 Deployment
 
-- **Health Loop** — каждый час проверяет состояние сервисов
-- **Infra Snapshot** — каждый час сохраняет снимок инфраструктуры
-- **Self Monitor** — следит за здоровьем системы
-- **Auto Remediation** — автоматически перезапускает упавшие сервисы
+### Quick Commands
 
-### Systemd сервисы
+```powershell
+# Deploy changes
+.\deploy\sync_to_server.ps1
+
+# View logs
+.\deploy\quick_fix.ps1 -ShowLogs
+
+# Restart service
+.\deploy\quick_fix.ps1 -Command "sudo systemctl restart brain-mcp"
+
+# Check database
+.\deploy\quick_fix.ps1 -Command "/home/Bilirubin/workspace/db_checklist.sh"
+
+# Run diagnostics
+.\deploy\quick_fix.ps1 -Command "/home/Bilirubin/workspace/agent_readiness_check.sh"
+```
+
+### Deployment Options
+
+**Option 1: Direct File Sync** (Recommended)
+- Fast and simple
+- No Git conflicts
+- Use: `.\deploy\sync_to_server.ps1`
+
+**Option 2: Git Push + Pull**
+- Version control
+- Commit history
+- Use: `.\deploy\deploy_to_server.ps1`
+
+**📚 Full Guide:** [docs/hermes-recovery/DEPLOY_CHEATSHEET.md](docs/hermes-recovery/DEPLOY_CHEATSHEET.md)
+
+---
+
+## 🔍 Hermes Recovery
+
+### Current Issues
+
+1. **Provider fallback loop** — HTTP 400 on rate limit crashes gateway
+2. **Session reset** — Requires manual /resume after restart
+3. **Message interruption** — New messages interrupt current tasks
+4. **MCP reconnect** — Requires gateway restart
+
+### Recovery Steps
+
+**Phase 1: Emergency Patch** (+5 min)
+- Disable incompatible NVIDIA llama fallback
+- Prevent HTTP 400 crash loop
+- **Guide:** [docs/hermes-recovery/HERMES_EMERGENCY_PATCH.md](docs/hermes-recovery/HERMES_EMERGENCY_PATCH.md)
+
+**Phase 2: Provider Capability Router** (+30 min)
+- Smart model selection based on capabilities
+- Proper fallback handling with rate limit awareness
+- **Guide:** [docs/hermes-recovery/HERMES_PHASE_9_9_PROVIDER_ROUTER.md](docs/hermes-recovery/HERMES_PHASE_9_9_PROVIDER_ROUTER.md)
+
+**Phase 3: Reliable Agent Runtime** (+2 hours)
+- Persistent message queue
+- Auto-resume after restart
+- Checkpoint system for long-running tasks
+- **Guide:** [docs/hermes-recovery/HERMES_PHASE_10_0_RELIABLE_RUNTIME.md](docs/hermes-recovery/HERMES_PHASE_10_0_RELIABLE_RUNTIME.md)
+
+**📚 Full Recovery Guide:** [docs/hermes-recovery/HERMES_RECOVERY_CHECKLIST.md](docs/hermes-recovery/HERMES_RECOVERY_CHECKLIST.md)
+
+---
+
+## 📊 Monitoring
+
+### Automatic Checks
+
+- **Health Loop** — Hourly service health checks (`infra-health-loop.timer`)
+- **Infra Snapshot** — Hourly infrastructure snapshots (`infra-snapshot.timer`)
+- **Self Monitor** — System health monitoring (`hermes-self-monitor.timer`)
+- **Auto Remediation** — Automatic service restart on failure
+
+### Manual Checks
 
 ```bash
-# Статус сервисов
+# Service status
 systemctl status brain-mcp hermes-gateway n8n
 
-# Логи
-journalctl -u brain-mcp -n 50
+# View logs
+journalctl -u brain-mcp -n 50 -f
 journalctl -u infra-health-loop -f
 
-# Перезапуск
+# Restart services
 sudo systemctl restart brain-mcp
+sudo systemctl restart hermes-gateway
 sudo systemctl daemon-reload
 ```
 
-## 🗄️ База данных
+### Prometheus Metrics
 
-### Структура
+- Node Exporter: `http://localhost:9100/metrics`
+- Prometheus UI: `http://localhost:9090`
 
-- **База `rag`** — долговременная память
-  - `workspaces` — рабочие пространства
-  - `projects` — проекты
-  - `artifacts` — артефакты
-  - `artifact_versions` — версии артефактов
-  - `rag_documents` — документы для поиска
-  - `insights` — инсайты
-  - `infra_snapshots` — снимки инфраструктуры
+---
 
-- **База `n8n`** — workflow runtime
+## 🗄️ Database
 
-### Коллекции RAG
+### Structure
 
-- `host-state` — состояние хоста
-- `host-insights` — инсайты о хосте
-- `host-optimization` — рекомендации по оптимизации
-- `obsidian-main` — основной контент Obsidian
-- `obsidian-rules` — правила из Obsidian
+**Database: `rag`** — Long-term memory
+- `workspaces` — Workspace definitions
+- `projects` — Project metadata
+- `artifacts` — Code artifacts
+- `artifact_versions` — Version history
+- `rag_documents` — Searchable documents
+- `insights` — Generated insights
+- `infra_snapshots` — Infrastructure state snapshots
 
-## 🧠 Knowledge Optimizer
+**Database: `n8n`** — Workflow runtime state
 
-Система для работы с Obsidian vault:
+### RAG Collections
 
-```powershell
-cd knowledge-optimizer
+- `host-state` — Current host state
+- `host-insights` — Host analysis and insights
+- `host-optimization` — Optimization recommendations
+- `obsidian-main` — Obsidian vault content
+- `obsidian-rules` — Obsidian rules and guidelines
 
-# Запуск web app
-.\scripts\run_app.ps1
+### Database Operations
 
-# Запуск MCP сервера
-.\scripts\run_mcp.ps1
+```bash
+# Check database
+/home/Bilirubin/workspace/db_checklist.sh
 
-# Полный цикл обслуживания
-.\scripts\run_full_cycle.ps1
+# Connect to PostgreSQL
+docker exec -it automation-postgres psql -U postgres -d rag
 
-# Установка автономного режима
-.\scripts\install_autonomy_schedule.ps1 -MaintenanceAt 03:00
+# Backup database
+docker exec automation-postgres pg_dump -U postgres rag > backup.sql
 ```
 
-Подробнее: [knowledge-optimizer/README.md](knowledge-optimizer/README.md)
+---
 
-## 🔐 Безопасность
+## 🧠 Brain MCP Server
+
+Model Context Protocol server providing:
+
+- **Memory Management** — Long-term memory storage and retrieval
+- **RAG Search** — Semantic search across collections
+- **Workspace Management** — Project and artifact tracking
+- **Infrastructure Monitoring** — System health and optimization
+
+### MCP Tools
+
+- `create_workspace` — Create new workspace
+- `create_project` — Create project in workspace
+- `store_artifact` — Store code artifact
+- `search_rag` — Semantic search
+- `get_insights` — Retrieve insights
+- `snapshot_infra` — Capture infrastructure state
+
+### Configuration
+
+```bash
+# Service file
+/etc/systemd/system/brain-mcp.service
+
+# Logs
+journalctl -u brain-mcp -f
+
+# Restart
+sudo systemctl restart brain-mcp
+```
+
+---
+
+## 🔐 Security
 
 ### Credentials
 
-- **НЕ коммить** `.deploy-config` (содержит SSH credentials)
-- **НЕ коммить** `.env` файлы
-- **Использовать** SSH ключи вместо паролей
-- **Проверять** изменения перед деплоем
+- **DON'T commit** `deploy/.deploy-config` (contains SSH credentials)
+- **DON'T commit** `.env` files
+- **USE** SSH keys instead of passwords
+- **VERIFY** changes before deploying
 
 ### Best Practices
 
 ```powershell
-# Всегда делай dry-run
-.\deploy_to_server.ps1 -DryRun
+# Always dry-run first
+.\deploy\deploy_to_server.ps1 -DryRun
 
-# Проверяй изменения
+# Check changes
 git status
 git diff
 
-# Делай бэкапы
-.\quick_fix.ps1 -Command "cd /home/Bilirubin/workspace && git branch backup-$(date +%Y%m%d)"
+# Make backups
+.\deploy\quick_fix.ps1 -Command "cd /home/Bilirubin/workspace && git branch backup-$(date +%Y%m%d)"
 ```
 
-## 📚 Документация
+---
 
-### Основная
+## 📚 Documentation
 
-- [MCP_CONTROL_PLANE.md](MCP_CONTROL_PLANE.md) — MCP control plane
-- [POSTGRES_MEMORY.md](POSTGRES_MEMORY.md) — структура памяти
-- [knowledge-optimizer/README.md](knowledge-optimizer/README.md) — Knowledge Optimizer
+### Getting Started
 
-### Deployment
+- [READY_START_HERE.md](docs/hermes-recovery/READY_START_HERE.md) — Start here!
+- [DEPLOY_NOW.md](docs/hermes-recovery/DEPLOY_NOW.md) — Quick deployment guide
+- [DEPLOY_CHEATSHEET.md](docs/hermes-recovery/DEPLOY_CHEATSHEET.md) — Command reference
 
-- [DEPLOY_SUMMARY.md](DEPLOY_SUMMARY.md) — обзор системы деплоя
-- [DEPLOY_CHEATSHEET.md](DEPLOY_CHEATSHEET.md) — быстрая шпаргалка
-- [DEPLOY_README.md](DEPLOY_README.md) — полная документация
+### Recovery
 
-### Skills
+- [HERMES_RECOVERY_CHECKLIST.md](docs/hermes-recovery/HERMES_RECOVERY_CHECKLIST.md) — Step-by-step recovery
+- [HERMES_EMERGENCY_PATCH.md](docs/hermes-recovery/HERMES_EMERGENCY_PATCH.md) — Emergency fix
+- [HERMES_PHASE_9_9_PROVIDER_ROUTER.md](docs/hermes-recovery/HERMES_PHASE_9_9_PROVIDER_ROUTER.md) — Provider router
+- [HERMES_PHASE_10_0_RELIABLE_RUNTIME.md](docs/hermes-recovery/HERMES_PHASE_10_0_RELIABLE_RUNTIME.md) — Reliable runtime
 
-- [kilo-claude45.SKILL.md](kilo-claude45.SKILL.md) — навыки для Claude
-- [postgres-memory.SKILL.md](postgres-memory.SKILL.md) — работа с памятью
-- [server-ops.SKILL.md](server-ops.SKILL.md) — операции на сервере
+### Architecture
+
+- [architecture/orchestration_gateway_design.md](docs/architecture/orchestration_gateway_design.md) — Gateway design
+- [architecture/SESSION_LOGGING.md](docs/architecture/SESSION_LOGGING.md) — Session logging
+- [architecture/infrastructure_improvements.md](docs/architecture/infrastructure_improvements.md) — Infrastructure improvements
+
+### Completed Phases
+
+- [history/PHASE_9_BACKUP_RESTORE_COMPLETE.md](docs/history/PHASE_9_BACKUP_RESTORE_COMPLETE.md)
+- [history/PHASE_9.9_PROVIDER_HOTFIX_COMPLETE.md](docs/history/PHASE_9.9_PROVIDER_HOTFIX_COMPLETE.md)
+- [history/PHASE_10_OBSERVABILITY_COMPLETE.md](docs/history/PHASE_10_OBSERVABILITY_COMPLETE.md)
+
+---
 
 ## 🆘 Troubleshooting
 
-### Сервисы не работают
+### Services Not Working
 
 ```powershell
-# Проверка состояния
-.\quick_fix.ps1 -ShowLogs
+# Check status
+.\deploy\quick_fix.ps1 -ShowLogs
 
-# Перезапуск
-.\quick_fix.ps1 -Command "sudo systemctl restart brain-mcp hermes-gateway n8n"
+# Restart all services
+.\deploy\quick_fix.ps1 -Command "sudo systemctl restart brain-mcp hermes-gateway n8n"
 
-# Логи
-.\quick_fix.ps1 -Command "sudo journalctl -u brain-mcp -n 100"
+# View logs
+.\deploy\quick_fix.ps1 -Command "sudo journalctl -u brain-mcp -n 100"
 ```
 
-### База данных недоступна
+### Database Issues
 
 ```powershell
-# Проверка PostgreSQL
-.\quick_fix.ps1 -Command "sudo docker ps | grep postgres"
-.\quick_fix.ps1 -Command "sudo docker logs automation-postgres --tail 50"
+# Check PostgreSQL
+.\deploy\quick_fix.ps1 -Command "sudo docker ps | grep postgres"
 
-# Перезапуск
-.\quick_fix.ps1 -Command "sudo docker restart automation-postgres"
+# View logs
+.\deploy\quick_fix.ps1 -Command "sudo docker logs automation-postgres --tail 50"
+
+# Restart database
+.\deploy\quick_fix.ps1 -Command "sudo docker restart automation-postgres"
 ```
 
-### Проблемы с деплоем
+### Deployment Issues
 
 ```powershell
-# Проверка подключения
-.\test_connection.ps1
+# Test connection
+.\deploy\test_connection.ps1
 
-# Проверка Git
-.\quick_fix.ps1 -Command "cd /home/Bilirubin/workspace && git status"
+# Check Git status
+.\deploy\quick_fix.ps1 -Command "cd /home/Bilirubin/workspace && git status"
 
-# Откат изменений
-.\quick_fix.ps1 -Command "cd /home/Bilirubin/workspace && git reset --hard HEAD~1"
+# Rollback
+.\deploy\quick_fix.ps1 -Command "cd /home/Bilirubin/workspace && git reset --hard HEAD~1"
 ```
 
-## 🎯 Быстрые команды
+### Hermes Gateway Issues
 
 ```powershell
-# Деплой
-.\deploy_to_server.ps1
+# Check gateway logs
+.\deploy\quick_fix.ps1 -Command "sudo journalctl -u hermes-gateway -n 100"
 
-# Диагностика
-.\quick_fix.ps1 -ShowLogs
+# Restart gateway
+.\deploy\quick_fix.ps1 -Command "sudo systemctl restart hermes-gateway"
 
-# Перезапуск сервиса
-.\quick_fix.ps1 -Command "sudo systemctl restart brain-mcp"
-
-# Проверка здоровья
-.\quick_fix.ps1 -Command "/home/Bilirubin/workspace/host_checklist.sh"
-
-# Проверка БД
-.\quick_fix.ps1 -Command "/home/Bilirubin/workspace/db_checklist.sh"
+# Check provider status
+.\deploy\quick_fix.ps1 -Command "curl http://localhost:8642/health"
 ```
 
-## 📞 Контакты
+---
 
-- GitHub: [Perlitten/knowledge-optimizer](https://github.com/Perlitten/knowledge-optimizer)
-- Документация: См. файлы `*.md` в корне проекта
+## 🎯 Development
 
-## 📄 Лицензия
+### Running Locally
 
-См. LICENSE файл в репозитории.
+```powershell
+# Run agent
+python scripts\run_agent.py
+
+# Test provider router
+python src\test_provider_router.py
+
+# Run MCP server
+python src\brain_mcp_server.py
+```
+
+### Tools
+
+```powershell
+# Extract code
+python tools\extract.py
+
+# Analyze token usage
+python tools\token_usage_analysis.py
+
+# Fix indentation
+python tools\fix_indent.py
+```
+
+---
+
+## 📞 Links
+
+- **Server:** `Bilirubin@34.133.31.146:/home/Bilirubin/workspace`
+- **Dashboard:** `http://34.133.31.146:9119`
+- **Gateway API:** `http://34.133.31.146:8642`
+- **n8n:** `http://34.133.31.146:5678`
+
+---
+
+## 📄 License
+
+See LICENSE file in repository.
+
+---
+
+**Status:** Production  
+**Last Updated:** 2026-05-05  
+**Maintainer:** Hermes Infrastructure Team
