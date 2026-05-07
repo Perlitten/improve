@@ -5,9 +5,25 @@ import time
 import uuid
 import httpx
 import threading
+import random
+import concurrent.futures
+import contextvars
 from typing import Any, Optional, Dict, List, Tuple
 from hermes_core.network import OpenAI, _get_proxy_from_env, _pool_may_recover_from_rate_limit
-from hermes_core.utils import _is_destructive_command
+from hermes_core.utils import _is_destructive_command, _should_parallelize_tool_batch, _MAX_TOOL_WORKERS
+
+from agent.tool_guardrails import ToolGuardrailDecision, append_toolguard_guidance, toolguard_synthetic_result
+from agent.display import KawaiiSpinner, build_tool_preview as _build_tool_preview, _detect_tool_failure, get_cute_tool_message as _get_cute_tool_message_impl
+from tools.terminal_tool import (
+    set_approval_callback as _set_approval_callback,
+    set_sudo_password_callback as _set_sudo_password_callback,
+    _get_approval_callback,
+    _get_sudo_password_callback,
+    get_active_env,
+)
+from tools.tool_result_storage import maybe_persist_tool_result, enforce_turn_budget
+from tools.interrupt import set_interrupt as _set_interrupt
+from model_tools import handle_function_call
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +56,7 @@ class ToolExecutionMixin:
             return api_msg
 
     def _sanitize_tool_call_arguments(
+            self,
             messages: list,
             *,
             logger=None,
@@ -51,7 +68,7 @@ class ToolExecutionMixin:
                 return 0
 
             repaired = 0
-            marker = AIAgent._TOOL_CALL_ARGUMENTS_CORRUPTION_MARKER
+            marker = getattr(self, "_TOOL_CALL_ARGUMENTS_CORRUPTION_MARKER", "[hermes-agent: tool call arguments were corrupted in this session and have been dropped to keep the conversation alive. See issue #15236.]")
 
             def _prepend_marker(tool_msg: dict) -> None:
                 existing = tool_msg.get("content")

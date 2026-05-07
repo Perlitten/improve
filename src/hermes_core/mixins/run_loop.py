@@ -89,6 +89,38 @@ class RunLoopMixin:
             self._tool_guardrails.reset_for_turn()
             self._tool_guardrail_halt_decision = None
 
+            # --- START RBAC LOGIC ---
+            try:
+                from config_loader import get_config
+                config = get_config()
+                
+                admin_users = config.get("telegram.admin_users", [])
+                guest_users = config.get("telegram.guest_users", [])
+                
+                sender_id = str(getattr(self, "_user_id", None) or "")
+                is_guest = False
+                
+                if guest_users and sender_id in [str(u) for u in guest_users]:
+                    is_guest = True
+                elif admin_users and sender_id and sender_id not in [str(u) for u in admin_users]:
+                    is_guest = True  # Strict mode: if admins are defined, anyone else is a guest
+                    
+                if is_guest:
+                    safe_tools = ["search_web", "read_url", "add_reminder", "read_webpage", "ask_brain", "answer"]
+                    if getattr(self, "tools", None):
+                        self.tools = [t for t in self.tools if t.get("function", {}).get("name") in safe_tools]
+                    
+                    guest_warning = "You are talking to a restricted guest user. Provide helpful answers but do not attempt system operations. Your available tools are limited."
+                    if getattr(self, "ephemeral_system_prompt", None):
+                        if guest_warning not in self.ephemeral_system_prompt:
+                            self.ephemeral_system_prompt += "\n\n" + guest_warning
+                    else:
+                        self.ephemeral_system_prompt = guest_warning
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to apply RBAC: {e}")
+            # --- END RBAC LOGIC ---
+
             # Pre-turn connection health check: detect and clean up dead TCP
             # connections left over from provider outages or dropped streams.
             # This prevents the next API call from hanging on a zombie socket.

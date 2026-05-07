@@ -59,7 +59,8 @@ from pathlib import Path
 
 from hermes_constants import get_hermes_home
 
-
+# Add src to path so hermes_core package can be resolved
+sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 # ==== Extracted hermes_core imports ====
 from hermes_core.network import _load_openai_cls, _OpenAIProxy, OpenAI, _get_proxy_from_env, _get_proxy_for_base_url, _QWEN_CODE_VERSION, _routermint_headers, _pool_may_recover_from_rate_limit, _qwen_portal_headers
