@@ -691,5 +691,142 @@ def ralph_status() -> dict[str, Any]:
     }
 
 
+@mcp.tool
+def inbox_reprioritize(
+    task_id: str,
+    new_priority: str,
+    actor: str = "hermes",
+) -> dict[str, Any]:
+    """S6: Change the priority of a queued or paused Ralph task.
+
+    new_priority must be one of: critical, high, normal, low.
+    Returns ok=True if updated, ok=False if task not found or priority invalid.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(WORKSPACE / "hermes" / "src"))
+    try:
+        from task_orchestrator_v2 import TaskOrchestrator  # type: ignore
+
+        orch = TaskOrchestrator()
+        success = orch.reprioritize(task_id, new_priority=new_priority, actor=actor)
+        if success:
+            return {"ok": True, "task_id": task_id, "new_priority": new_priority}
+        return {"ok": False, "error": "task_not_found_or_invalid_priority",
+                "task_id": task_id, "requested_priority": new_priority}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool
+def queue_metrics() -> dict[str, Any]:
+    """S8: Return detailed Ralph queue statistics.
+
+    Includes counts by status and priority, stuck running tasks (>30 min),
+    tasks waiting for backoff retry, and next scheduled retry timestamp.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(WORKSPACE / "hermes" / "src"))
+    try:
+        from task_orchestrator_v2 import TaskOrchestrator  # type: ignore
+
+        orch = TaskOrchestrator()
+        metrics = orch.queue_metrics()
+        return {"ok": True, **metrics}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool
+def audit_trail(
+    task_id: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """S9: Read the immutable audit log for Ralph task lifecycle events.
+
+    Pass task_id to filter by task, or omit for the latest `limit` events across all tasks.
+    Events include: enqueued, created, dequeued, checkpoint, completed, failed,
+    retry_scheduled, paused, resumed, reprioritized.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(WORKSPACE / "hermes" / "src"))
+    try:
+        from task_orchestrator_v2 import TaskOrchestrator  # type: ignore
+
+        safe_limit = max(1, min(int(limit), 200))
+        orch = TaskOrchestrator()
+        trail = orch.get_audit_trail(task_id=task_id, limit=safe_limit)
+        return {"ok": True, "count": len(trail), "events": trail}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool
+def task_alerts() -> dict[str, Any]:
+    """S8: Return actionable alerts about the Ralph task queue.
+
+    Checks for stuck running tasks (>30 min), repeated failures, and backlog buildup.
+    Returns a list of alert dicts with severity (warning/critical) and description.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(WORKSPACE / "hermes" / "src"))
+    try:
+        from task_orchestrator_v2 import TaskOrchestrator, get_db_connection  # type: ignore
+
+        orch = TaskOrchestrator()
+        metrics = orch.queue_metrics()
+
+        alerts = []
+
+        # Stuck running tasks
+        stuck = metrics.get("stuck_running", 0)
+        if stuck > 0:
+            alerts.append({
+                "severity": "critical" if stuck > 2 else "warning",
+                "code": "stuck_running",
+                "count": stuck,
+                "description": f"{stuck} task(s) have been in 'running' state for >30 minutes — possible crash or hang.",
+            })
+
+        # Large backlog
+        queued = metrics.get("queue_depth", 0)
+        if queued > 20:
+            alerts.append({
+                "severity": "warning",
+                "code": "queue_backlog",
+                "count": queued,
+                "description": f"Queue backlog is {queued} tasks — consider checking Ralph service health.",
+            })
+
+        # Many failures
+        failed = metrics.get("by_status", {}).get("failed", 0)
+        if failed > 5:
+            alerts.append({
+                "severity": "warning",
+                "code": "high_failure_count",
+                "count": failed,
+                "description": f"{failed} tasks permanently failed — investigate error patterns via audit_trail.",
+            })
+
+        # Tasks waiting for backoff retry
+        pending_retry = metrics.get("pending_retry", 0)
+        if pending_retry > 0:
+            next_retry = metrics.get("next_retry_at")
+            alerts.append({
+                "severity": "info",
+                "code": "pending_backoff_retry",
+                "count": pending_retry,
+                "description": f"{pending_retry} task(s) waiting for exponential backoff retry. Next retry at: {next_retry}.",
+            })
+
+        return {
+            "ok": True,
+            "alert_count": len(alerts),
+            "alerts": alerts,
+            "metrics_snapshot": metrics,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 if __name__ == "__main__":
     mcp.run()
