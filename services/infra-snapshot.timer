@@ -4,6 +4,7 @@ Description=Refresh Hermes host infrastructure snapshot every 5 minutes
 [Timer]
 OnBootSec=1min
 OnUnitActiveSec=5min
+RandomizedDelaySec=30s
 Unit=infra-snapshot.service
 Persistent=true
 

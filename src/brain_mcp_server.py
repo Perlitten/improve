@@ -17,6 +17,7 @@ import sys
 
 sys.path.insert(0, "/usr/local/bin")
 from canonical_memory import ensure_project, ensure_schema, ensure_workspace, record_insight  # noqa: E402
+from hermes_core.db import db_conn, get_conn, put_conn  # noqa: E402
 
 
 WORKSPACE = Path("/home/Bilirubin/workspace")
@@ -101,6 +102,15 @@ def run_json_script(script: str, payload: dict[str, Any], timeout: int) -> dict[
 
 
 def pg_conn(dbname: str = "rag"):
+    """Return a connection for dbname.
+
+    'rag' DB: borrowed from the shared ThreadedConnectionPool (efficient for
+    the long-running brain-mcp service). Other DBs: fresh connection.
+    Callers use this as a context manager (`with pg_conn() as conn`); the pool
+    version returns a _PooledConnCtx wrapper that auto-returns to the pool.
+    """
+    if dbname == "rag":
+        return _PooledConnCtx()
     env = read_env(AUTOMATION_ENV)
     return psycopg2.connect(
         host="127.0.0.1",
@@ -109,6 +119,25 @@ def pg_conn(dbname: str = "rag"):
         user=env["POSTGRES_USER"],
         password=env["POSTGRES_PASSWORD"],
     )
+
+
+class _PooledConnCtx:
+    """Context manager that borrows a connection from the pool and returns it."""
+    def __init__(self):
+        self._conn = None
+
+    def __enter__(self):
+        self._conn = get_conn()
+        return self._conn
+
+    def __exit__(self, exc_type, *_):
+        if self._conn is not None:
+            if exc_type:
+                self._conn.rollback()
+            else:
+                self._conn.commit()
+            put_conn(self._conn)
+            self._conn = None
 
 
 def http_get(url: str, timeout: int = 10) -> dict[str, Any]:

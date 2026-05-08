@@ -7,4 +7,8 @@ Wants=network-online.target
 Type=oneshot
 ExecStartPre=/bin/systemctl start infra-snapshot.service
 ExecStart=/usr/bin/python3 /usr/local/bin/health_optimization_loop.py
+MemoryMax=256M
+MemoryHigh=200M
+CPUQuota=50%
+TasksMax=30
 

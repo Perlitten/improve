@@ -13,6 +13,9 @@ ExecStartPre=-/usr/bin/docker rm -f prometheus
 ExecStart=/usr/bin/docker run --rm \
   --name prometheus \
   --network host \
+  --memory 300m \
+  --memory-reservation 200m \
+  --cpus 0.30 \
   -v /home/Bilirubin/workspace/prometheus.yml:/etc/prometheus/prometheus.yml:ro \
   -v prometheus_data:/prometheus \
   prom/prometheus:latest \
@@ -24,6 +27,8 @@ ExecStart=/usr/bin/docker run --rm \
 ExecStop=/usr/bin/docker stop prometheus
 Restart=on-failure
 RestartSec=10
+MemoryMax=400M
+CPUQuota=35%
 
 [Install]
 WantedBy=multi-user.target

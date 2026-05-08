@@ -64,28 +64,47 @@ def get_conn():
     )
 
 
-def _embed(text):
-    """Generate 1024-dim embedding via NVIDIA API; fall back to zeros."""
+class EmbeddingUnavailable(RuntimeError):
+    """Raised when the embedding API is unreachable or unconfigured.
+
+    Callers must NOT fall back to zero vectors — zero vectors corrupt the HNSW index.
+    Either skip the embed-dependent operation or propagate this exception.
+    """
+
+
+_EMBED_MODEL = "nvidia/nv-embedqa-e5-v5"
+_EMBED_MODEL_VERSION = "1"
+
+
+def _embed(text: str) -> list[float]:
+    """Generate 1024-dim embedding via NVIDIA API.
+
+    Raises EmbeddingUnavailable instead of returning zero vectors to prevent
+    HNSW index poisoning.
+    """
     key = os.getenv("NVIDIA_API_KEY")
     if not key:
-        return [0.0] * 1024
+        raise EmbeddingUnavailable("NVIDIA_API_KEY not set — cannot generate embedding")
     try:
         import requests
         r = requests.post(
             "https://integrate.api.nvidia.com/v1/embeddings",
             headers={"Authorization": f"Bearer {key}"},
-            json={"model": "nvidia/nv-embedqa-e5-v5",
-                  "input": [text], "input_type": "passage"},
+            json={"model": _EMBED_MODEL, "input": [text], "input_type": "passage"},
             timeout=15,
         )
+        r.raise_for_status()
         return r.json()["data"][0]["embedding"]
-    except Exception:
-        return [0.0] * 1024
+    except Exception as exc:
+        raise EmbeddingUnavailable(f"embedding API failed: {exc}") from exc
 
 
 def _save_to_kb(title, content, source="strategy_system", category="meta"):
     """Persist a learning event to knowledge_base for semantic recall."""
-    emb = _embed(f"{title}\n{content}")
+    try:
+        emb = _embed(f"{title}\n{content}")
+    except EmbeddingUnavailable:
+        return  # skip rather than poison the index with zero vectors
     conn = get_conn()
     now = datetime.now(timezone.utc)
     with conn.cursor() as cur:

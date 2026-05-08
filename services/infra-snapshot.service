@@ -6,4 +6,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 /usr/local/bin/render_infra_snapshot.py
+MemoryMax=128M
+MemoryHigh=100M
+CPUQuota=30%
+TasksMax=20
 

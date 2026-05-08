@@ -5,6 +5,19 @@ from pathlib import Path
 
 from psycopg2.extras import Json
 
+_SECRET_PATTERNS = [
+    (r"sk-[A-Za-z0-9_-]{12,}", "sk-***"),
+    (r"sk-or-v1-[A-Za-z0-9_-]{12,}", "sk-or-v1-***"),
+    (r"\b\d{8,12}:[A-Za-z0-9_-]{20,}\b", "***telegram-token***"),
+    (r"(?i)(password|token|secret|api[_-]?key|encryption[_-]?key)=(\S+)", r"\1=***"),
+]
+
+
+def _redact(text: str) -> str:
+    for pattern, repl in _SECRET_PATTERNS:
+        text = re.sub(pattern, repl, text)
+    return text
+
 
 def slugify(value: str, fallback: str = "item") -> str:
     value = (value or "").strip().lower().replace("\\", "/")
@@ -564,7 +577,7 @@ def verify_queryability_from_rag(
         except Exception as exc:  # pragma: no cover
             payload["queryability_status"] = "error"
             payload["queryability_probe_kind"] = "derived_source_match"
-            payload["queryability_error"] = str(exc)
+            payload["queryability_error"] = _redact(str(exc))
 
     cur.execute(
         """

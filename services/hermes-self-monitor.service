@@ -15,3 +15,7 @@ ExecStart=/bin/bash -lc '/home/Bilirubin/.hermes/venv/bin/hermes cron run --acce
 TimeoutStartSec=900
 StandardOutput=journal
 StandardError=journal
+MemoryMax=512M
+MemoryHigh=400M
+CPUQuota=60%
+TasksMax=100

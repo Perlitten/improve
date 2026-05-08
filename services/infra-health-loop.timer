@@ -4,6 +4,7 @@ Description=Run Hermes host health and optimization loop every 15 minutes
 [Timer]
 OnBootSec=3min
 OnUnitActiveSec=15min
+RandomizedDelaySec=30s
 Unit=infra-health-loop.service
 Persistent=true
 

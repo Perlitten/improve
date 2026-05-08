@@ -16,6 +16,10 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
+MemoryMax=400M
+MemoryHigh=300M
+CPUQuota=40%
+TasksMax=100
 
 [Install]
 WantedBy=multi-user.target
