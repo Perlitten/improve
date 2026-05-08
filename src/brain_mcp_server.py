@@ -39,6 +39,7 @@ ALLOWED_SERVICES = {
     "infra-health-loop",
     "prometheus",
     "node-exporter",
+    "ralph",
 }
 
 SECRET_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "PASS", "PRIVATE", "ENCRYPTION", "CREDENTIAL")
@@ -574,6 +575,155 @@ def notion_status() -> dict[str, Any]:
         "present_keys": present,
         "note": "Use a Notion internal integration token for headless automation; token values are never returned.",
     }
+
+
+# ---------------------------------------------------------------------------
+# Ralph / Inbox MCP tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool
+def inbox_enqueue(
+    message: str,
+    source: str = "mcp",
+    priority: int = 5,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Submit a task to agent_inbox for Ralph to process autonomously.
+
+    priority: 1-10 where 1=critical, 3-4=high, 5-6=normal, 7-10=low.
+    Ralph processes only low/normal (7-10, 5-6) without human approval.
+    critical/high tasks will be paused and you will be notified via Telegram.
+    """
+    try:
+        import sys as _sys
+        for _p in ("/home/Bilirubin/workspace/hermes/src", "/srv/automation/bin"):
+            if _p not in _sys.path:
+                _sys.path.insert(0, _p)
+        from task_orchestrator_v2 import TaskOrchestrator
+        from s5.source_router import SourceRouter
+
+        orch = TaskOrchestrator()
+        router = SourceRouter(orch)
+        safe_priority = max(1, min(10, int(priority)))
+        inbox_id = router.submit(
+            message=str(message or "").strip(),
+            source=f"mcp:{source}",
+            priority=safe_priority,
+            metadata=metadata or {},
+        )
+        return {
+            "ok": inbox_id is not None,
+            "inbox_id": inbox_id,
+            "duplicate": inbox_id is None,
+            "priority": safe_priority,
+            "autonomous": safe_priority >= 5,  # low/normal → Ralph processes
+        }
+    except Exception as exc:
+        return {"ok": False, "error": redact_text(str(exc))}
+
+
+@mcp.tool
+def inbox_status(task_id: str | None = None, limit: int = 10) -> dict[str, Any]:
+    """
+    Get status of tasks in agent_inbox / agent_tasks.
+
+    If task_id is provided — returns single task detail.
+    Otherwise returns the most recent N tasks (max 50).
+    """
+    try:
+        import sys as _sys
+        for _p in ("/home/Bilirubin/workspace/hermes/src", "/srv/automation/bin"):
+            if _p not in _sys.path:
+                _sys.path.insert(0, _p)
+        from task_orchestrator_v2 import TaskOrchestrator
+
+        orch = TaskOrchestrator()
+        if task_id:
+            task = orch.get_task_status(str(task_id).strip())
+            return {"ok": bool(task), "task": task}
+
+        safe_limit = max(1, min(int(limit), 50))
+        with pg_conn("rag") as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT t.id, t.title, t.status, t.created_at, t.updated_at,
+                           i.source, i.priority,
+                           left(i.raw_text, 200) AS message_preview
+                    FROM agent_tasks t
+                    LEFT JOIN agent_inbox i ON i.active_task_id = t.id
+                    ORDER BY t.created_at DESC
+                    LIMIT %s
+                    """,
+                    (safe_limit,),
+                )
+                rows = cur.fetchall()
+        return {
+            "ok": True,
+            "count": len(rows),
+            "tasks": [dict(r) for r in rows],
+        }
+    except Exception as exc:
+        return {"ok": False, "error": redact_text(str(exc))}
+
+
+@mcp.tool
+def ralph_status() -> dict[str, Any]:
+    """
+    Check Ralph runner health: service status, queue depth, task counts by status.
+    """
+    try:
+        import sys as _sys
+        import subprocess as _sp
+        for _p in ("/home/Bilirubin/workspace/hermes/src", "/srv/automation/bin"):
+            if _p not in _sys.path:
+                _sys.path.insert(0, _p)
+        from task_orchestrator_v2 import TaskOrchestrator
+
+        # systemctl is-active ralph
+        try:
+            proc = _sp.run(
+                ["systemctl", "is-active", "ralph"],
+                capture_output=True, text=True, timeout=5,
+            )
+            svc_status = proc.stdout.strip() or "unknown"
+        except Exception:
+            svc_status = "unknown"
+
+        orch = TaskOrchestrator()
+        depth = orch.get_queue_depth()
+
+        with pg_conn("rag") as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT status, count(*)::int AS count
+                    FROM agent_tasks
+                    GROUP BY status
+                    ORDER BY status
+                    """
+                )
+                by_status = [dict(r) for r in cur.fetchall()]
+
+                cur.execute(
+                    """
+                    SELECT count(*)::int FROM agent_inbox
+                    WHERE status = 'new'
+                    """
+                )
+                inbox_new = (cur.fetchone() or {}).get("count", 0)
+
+        return {
+            "ok": True,
+            "ralph_service": svc_status,
+            "ralph_running": svc_status == "active",
+            "queue_depth": depth,
+            "inbox_new": inbox_new,
+            "tasks_by_status": by_status,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": redact_text(str(exc))}
 
 
 if __name__ == "__main__":

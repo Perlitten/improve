@@ -1,0 +1,32 @@
+[Unit]
+Description=Ralph autonomous task runner (Hermes Phase 10 S8)
+Documentation=https://github.com/NousResearch/hermes-agent
+After=network-online.target hermes-gateway.service
+Wants=network-online.target
+# Не Requires — Ralph должен стартовать даже если gateway временно недоступен.
+# ResourceGuard внутри Runner сам решит когда начинать работу.
+
+[Service]
+Type=simple
+User=Bilirubin
+Group=Bilirubin
+WorkingDirectory=/home/Bilirubin/workspace/hermes/src
+Environment=HOME=/home/Bilirubin
+Environment=HERMES_HOME=/home/Bilirubin/.hermes
+Environment=PYTHONPATH=/home/Bilirubin/workspace/hermes/src:/usr/local/bin:/srv/automation/bin
+Environment=PATH=/home/Bilirubin/.hermes/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/Bilirubin/.hermes/venv/bin/python3 -m ralph.runner
+Restart=on-failure
+RestartSec=30
+StartLimitBurst=3
+StartLimitIntervalSec=300
+# Graceful stop: ждём до 5 мин чтобы Ralph закончил текущую задачу
+TimeoutStopSec=300
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ralph
+
+[Install]
+WantedBy=multi-user.target
