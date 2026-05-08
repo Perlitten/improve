@@ -1,0 +1,145 @@
+{
+  "phase": "10.0",
+  "title": "Reliable Runtime",
+  "scope": "End-to-end durable task execution system with inbox integration, state machine, and automated recovery",
+  "stories": [
+    {
+      "id": "S2",
+      "title": "Task Orchestrator Basic State Machine + Request Queue",
+      "description": "Create durable task state management for agent_tasks table, state machine, and inbox integration. No S3/S4/S5 code.",
+      "status": "completed",
+      "depends_on": [],
+      "files_modified": [
+        "/home/Bilirubin/workspace/hermes/src/task_orchestrator_v2.py",
+        "/home/Bilirubin/workspace/hermes/tests/unit/test_task_orchestrator_v2.py"
+      ],
+      "evidence": [
+        "23/23 tests passed",
+        "operator_standard_eval: pass",
+        "report: /home/Bilirubin/workspace/reports/PHASE_10_0_S2_TASK_ORCHESTRATOR.md"
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "Task Workspace — Checkpoint Paths, Plan/Progress File Management",
+      "description": "Implement checkpoint paths, plan/progress file management, and workspace state persistence.",
+      "status": "completed",
+      "depends_on": [
+        "S2"
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "Checkpoint Manager",
+      "description": "S4 checkpoint manager only: save/load/list checkpoints, corrupt JSON behavior, secret redaction, workspace checkpoint paths. No S5 auto-resume, no MCP reconnect, no Ralph-lite runner.",
+      "status": "accepted",
+      "depends_on": [
+        "S3"
+      ],
+      "accepted_at": "2026-05-08T13:55:43Z",
+      "reviewer": "codex_desktop_external_operator_review",
+      "reviewer_verdict": "pass",
+      "nemotron_final_reviewer": "not_run_cost_guard_blocked",
+      "files_modified": [
+        "/home/Bilirubin/workspace/hermes/src/checkpoint_manager/checkpoint_manager.py",
+        "/home/Bilirubin/workspace/hermes/tests/unit/test_checkpoint_manager.py"
+      ],
+      "evidence": [
+        "resource_preflight: pass at acceptance time; RAM available 816 MB, disk 77%, load 0.26/0.16/0.11",
+        "PYTHONPATH=src python3 -m pytest tests/unit/test_checkpoint_manager.py -q --no-cov: 7 passed in 0.05s",
+        "py_compile: pass",
+        "remaining_failed_tests: []",
+        "S5_started: no",
+        "Ralph_lite_started: no",
+        "report: /home/Bilirubin/workspace/reports/PHASE_10_0_S4_CHECKPOINT_MANAGER.md"
+      ]
+    },
+    {
+      "id": "10.R",
+      "title": "Resource Guard / Low-RAM Execution Mode",
+      "description": "Preflight guard for stories, targeted tests, migrations, gateway restarts, model probes, and reviewer calls. Blocks unsafe RAM/disk/load/gateway/cost states before autonomous work.",
+      "status": "accepted",
+      "depends_on": [
+        "S4"
+      ],
+      "accepted_at": "2026-05-08T14:01:02Z",
+      "files_modified": [
+        "/home/Bilirubin/workspace/hermes/src/resource_guard/resource_guard.py",
+        "/home/Bilirubin/workspace/hermes/src/resource_guard/__init__.py",
+        "/home/Bilirubin/workspace/hermes/tests/unit/test_resource_guard.py"
+      ],
+      "evidence": [
+        "PYTHONPATH=src python3 -m pytest tests/unit/test_resource_guard.py -q --no-cov: 10 passed in 0.04s",
+        "PYTHONPATH=src python3 -m pytest tests/unit/test_resource_guard.py tests/unit/test_checkpoint_manager.py -q --no-cov: 17 passed in 0.10s",
+        "live CLI reviewer_call: blocked because daily_cost_total_usd 2.1604 > 2.0000",
+        "live CLI targeted_tests: allowed with swap warning",
+        "S5_started: no",
+        "Ralph_lite_started: no"
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "Source Ingestion — Telegram, n8n, API Webhooks",
+      "description": "Integrate source ingestion from Telegram, n8n, and API webhooks into inbox.",
+      "status": "pending",
+      "depends_on": [
+        "10.R"
+      ]
+    },
+    {
+      "id": "S6",
+      "title": "Task Priority Queue — Dynamic Reordering, User Override",
+      "description": "Implement dynamic priority queue with user override and priority inheritance.",
+      "status": "pending",
+      "depends_on": [
+        "S5"
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "Retry Policy Engine — Exponential Backoff, Max Retries, Circuit Breaker",
+      "description": "Build retry policy engine with exponential backoff, max retries, and circuit breaker.",
+      "status": "pending",
+      "depends_on": [
+        "S6"
+      ]
+    },
+    {
+      "id": "S8",
+      "title": "Task Monitoring — Dashboard, Alerts, Health Metrics",
+      "description": "Add monitoring dashboard, alerts, and health metrics for task execution.",
+      "status": "pending",
+      "depends_on": [
+        "S7"
+      ]
+    },
+    {
+      "id": "S9",
+      "title": "Audit Trail — Immutable Log, User Actions, System Events",
+      "description": "Implement immutable audit trail for user actions and system events.",
+      "status": "pending",
+      "depends_on": [
+        "S8"
+      ]
+    },
+    {
+      "id": "S10",
+      "title": "Final Integration — End-to-End Test, CI/CD, Documentation",
+      "description": "Run end-to-end test, integrate CI/CD pipeline, and finalize documentation.",
+      "status": "pending",
+      "depends_on": [
+        "S9"
+      ]
+    }
+  ],
+  "last_updated": "2026-05-08T14:01:02Z",
+  "current_story": "S5 gated_pending_user_decision",
+  "gates": {
+    "S4_accepted": true,
+    "S5_started": false,
+    "Ralph_lite_started": false,
+    "daily_cost_guard": "blocked: 2026-05-08 total $2.1604 > limit $2.0000",
+    "nemotron_reviewer": "not_run_cost_guard_blocked",
+    "resource_guard_accepted": true
+  }
+}

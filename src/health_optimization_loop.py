@@ -16,6 +16,9 @@ AUTOMATION_ENV = Path("/srv/automation/.env")
 HERMES_ENV = Path("/home/Bilirubin/.hermes/.env")
 HERMES_CONFIG = Path("/home/Bilirubin/.hermes/config.yaml")
 SERVICES = ["hermes-gateway", "hermes-dashboard", "n8n", "automation-gateway", "brain-mcp", "nginx", "docker"]
+RESTART_CIRCUIT_PATH = Path(os.getenv("HERMES_HEALTH_RESTART_CIRCUIT", "/var/tmp/hermes_health_restart_circuit.json"))
+RESTART_CIRCUIT_WINDOW_SECONDS = int(os.getenv("HERMES_RESTART_CIRCUIT_WINDOW_SECONDS", "3600"))
+RESTART_CIRCUIT_MAX_ATTEMPTS = int(os.getenv("HERMES_RESTART_CIRCUIT_MAX_ATTEMPTS", "3"))
 
 # Model tiers — ordered by default runtime preference.
 # Keep free NVIDIA models primary; paid OpenRouter is reserved for explicit
@@ -204,7 +207,7 @@ def select_optimal_model(providers: dict) -> dict:
 
 
 def apply_model_selection(providers: dict, pg_env: dict) -> dict:
-    """Pick best model, update config if changed, restart gateway if degrading."""
+    """Pick best model and request a guarded gateway restart if config changed."""
     best = select_optimal_model(providers)
     current = _get_current_model()
     provider = _runtime_provider(best["provider"])
@@ -233,9 +236,16 @@ def apply_model_selection(providers: dict, pg_env: dict) -> dict:
     is_downgrade = new_tier_idx > current_tier_idx
 
     # Config writes are not enough: the gateway keeps provider/model state in process.
-    # Restart on every model switch to avoid config/runtime drift.
-    run("sudo", "systemctl", "restart", "hermes-gateway")
-    result["restarted"] = True
+    # Never restart the gateway directly from the self-healing loop; use the
+    # guarded restart path so circuit-breaker and cgroup checks stay in force.
+    if Path("/usr/local/bin/safe_restart_gateway.sh").exists():
+        rc, stdout, stderr = run("sudo", "/usr/local/bin/safe_restart_gateway.sh")
+        result["restart_requested"] = True
+        result["restart_rc"] = rc
+        result["restart_detail"] = (stderr or stdout or "")[:300]
+    else:
+        result["restart_requested"] = False
+        result["restart_skipped"] = "safe_restart_gateway.sh not found"
 
     # Persist switch event
     now = datetime.now(timezone.utc)
@@ -618,97 +628,77 @@ def persist_report(status, severity, recommendations, summary, pg_env):
 
 
 AUTO_RESTART_SAFE = {
-    # hermes-gateway intentionally excluded — use _gateway_restart_allowed() instead
+    # Intentionally excludes hermes-gateway. The gateway is the runtime through
+    # which agent tooling operates, so self-healing must not directly flap it.
+    # Gateway restarts are only allowed through safe_restart_gateway.sh/manual ops.
     "hermes-dashboard", "n8n",
     "automation-gateway", "brain-mcp", "nginx",
     "node-exporter", "prometheus",
 }
 
-_GATEWAY_COUNTER_PATH = Path("/var/lib/hermes/restart_count.json")
-_GATEWAY_WINDOW_SECS = 3600   # 1 hour
-_GATEWAY_MAX_RESTARTS = 3
 
-
-def _send_telegram_alert(message: str, pg_env: dict) -> None:
-    token = pg_env.get("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_id = pg_env.get("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id:
-        return
+def _load_restart_circuit() -> dict:
     try:
-        payload = json.dumps({"chat_id": chat_id, "text": message, "parse_mode": "HTML"}).encode()
-        req = request.Request(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        request.urlopen(req, timeout=10)
+        return json.loads(RESTART_CIRCUIT_PATH.read_text(encoding="utf-8"))
     except Exception:
-        pass
+        return {"services": {}}
 
 
-def _gateway_restart_allowed(pg_env: dict) -> bool:
-    """Sliding-window counter: allow restart only if <3 restarts in the last 60 min.
+def _save_restart_circuit(state: dict) -> None:
+    RESTART_CIRCUIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = RESTART_CIRCUIT_PATH.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(RESTART_CIRCUIT_PATH)
 
-    Reads/writes /var/lib/hermes/restart_count.json.
-    Returns True if restart is allowed, False (and sends Telegram alert) if flapping.
-    """
-    now = datetime.now(timezone.utc).timestamp()
-    try:
-        _GATEWAY_COUNTER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if _GATEWAY_COUNTER_PATH.exists():
-            data = json.loads(_GATEWAY_COUNTER_PATH.read_text())
-        else:
-            data = {"restarts": []}
-        recent = [ts for ts in data.get("restarts", []) if now - ts < _GATEWAY_WINDOW_SECS]
-        if len(recent) >= _GATEWAY_MAX_RESTARTS:
-            _send_telegram_alert(
-                f"⛔ hermes-gateway FLAPPING: {len(recent)} restarts in the last "
-                f"{_GATEWAY_WINDOW_SECS // 60} min. Auto-restart suspended. Manual intervention required.",
-                pg_env,
-            )
-            return False
-        recent.append(now)
-        _GATEWAY_COUNTER_PATH.write_text(json.dumps({"restarts": recent}))
-        return True
-    except Exception:
-        return True  # if counter file is broken, allow restart but don't crash the loop
+
+def _restart_attempts(state: dict, service: str, now_ts: float) -> list[dict]:
+    services = state.setdefault("services", {})
+    attempts = services.setdefault(service, [])
+    cutoff = now_ts - RESTART_CIRCUIT_WINDOW_SECONDS
+    fresh = [item for item in attempts if float(item.get("ts", 0)) >= cutoff]
+    services[service] = fresh
+    return fresh
+
+
+def _circuit_open_action(service: str, attempts: list[dict]) -> dict:
+    return {
+        "service": service,
+        "action": "restart_skipped_circuit_open",
+        "recovered": False,
+        "detail": (
+            f"Restart circuit open: {len(attempts)} restart attempts in "
+            f"{RESTART_CIRCUIT_WINDOW_SECONDS}s. Escalating instead of flapping."
+        ),
+    }
+
+
+def _record_restart_attempt(state: dict, service: str, now_ts: float, rc: int, recovered: bool) -> None:
+    attempts = _restart_attempts(state, service, now_ts)
+    attempts.append({
+        "ts": now_ts,
+        "at": datetime.fromtimestamp(now_ts, timezone.utc).isoformat(),
+        "rc": rc,
+        "recovered": recovered,
+    })
 
 
 def auto_remediate(status: dict, pg_env: dict) -> list[dict]:
     """Restart inactive services that are safe to auto-restart. Returns list of actions taken."""
     actions = []
-
-    # hermes-gateway gets a sliding-window flap guard
-    gw_info = status["services"].get("hermes-gateway", {})
-    if not gw_info.get("active"):
-        if _gateway_restart_allowed(pg_env):
-            rc, stdout, stderr = run("sudo", "systemctl", "restart", "hermes-gateway")
-            import time; time.sleep(2)
-            _, active_out, _ = run("systemctl", "is-active", "hermes-gateway")
-            recovered = active_out.strip() == "active"
-            actions.append({
-                "service": "hermes-gateway",
-                "action": "restart",
-                "rc": rc,
-                "recovered": recovered,
-                "detail": stderr[:200] if stderr else stdout[:200],
-            })
-        else:
-            actions.append({
-                "service": "hermes-gateway",
-                "action": "flap_guard_blocked",
-                "rc": -1,
-                "recovered": False,
-                "detail": "Restart blocked: exceeded flap threshold. Telegram alert sent.",
-            })
-
+    circuit = _load_restart_circuit()
+    now_ts = datetime.now(timezone.utc).timestamp()
     for name, info in status["services"].items():
         if info["active"] or name not in AUTO_RESTART_SAFE:
+            continue
+        attempts = _restart_attempts(circuit, name, now_ts)
+        if len(attempts) >= RESTART_CIRCUIT_MAX_ATTEMPTS:
+            actions.append(_circuit_open_action(name, attempts))
             continue
         rc, stdout, stderr = run("sudo", "systemctl", "restart", name)
         import time; time.sleep(2)
         _, active_out, _ = run("systemctl", "is-active", name)
         recovered = active_out.strip() == "active"
+        _record_restart_attempt(circuit, name, now_ts, rc, recovered)
         actions.append({
             "service": name,
             "action": "restart",
@@ -722,8 +712,15 @@ def auto_remediate(status: dict, pg_env: dict) -> list[dict]:
         "sudo", "docker", "inspect", "--format", "{{.State.Health.Status}}", "automation-postgres"
     )
     if docker_health.strip() not in ("healthy", ""):
-        rc, stdout, stderr = run("sudo", "docker", "restart", "automation-postgres")
-        actions.append({"service": "automation-postgres", "action": "docker_restart", "rc": rc})
+        attempts = _restart_attempts(circuit, "automation-postgres", now_ts)
+        if len(attempts) >= RESTART_CIRCUIT_MAX_ATTEMPTS:
+            actions.append(_circuit_open_action("automation-postgres", attempts))
+        else:
+            rc, stdout, stderr = run("sudo", "docker", "restart", "automation-postgres")
+            _record_restart_attempt(circuit, "automation-postgres", now_ts, rc, rc == 0)
+            actions.append({"service": "automation-postgres", "action": "docker_restart", "rc": rc})
+
+    _save_restart_circuit(circuit)
 
     if actions:
         now = datetime.now(timezone.utc)
@@ -743,16 +740,19 @@ def auto_remediate(status: dict, pg_env: dict) -> list[dict]:
     return actions
 
 
+
 _DAILY_BUDGET_USD = 1.0  # alert if OpenRouter daily spend exceeds this
 
 
 def _check_daily_spend(providers: dict, pg_env: dict) -> dict:
-    """Compare current OpenRouter cumulative usage against 24h-ago snapshot.
+    """Compare current OpenRouter cumulative usage against a 24-h-ago snapshot.
 
-    Returns {"daily_usd": float, "over_budget": bool} so build_recommendations
-    can add a rec and main() can send a Telegram alert.
+    Returns {"daily_usd": float|None, "over_budget": bool}.
     Snapshots are stored in rag_documents(collection='host-insights', source='or-usage-snapshot').
     """
+    import psycopg2
+    from psycopg2.extras import Json
+
     or_info = providers.get("openrouter", {})
     current_usage = or_info.get("usage_usd")
     if current_usage is None:
@@ -767,7 +767,6 @@ def _check_daily_spend(providers: dict, pg_env: dict) -> dict:
         )
         with conn:
             with conn.cursor() as cur:
-                # Fetch the oldest usage snapshot from the last 25 hours
                 cur.execute(
                     """
                     SELECT (metadata->>'usage_usd')::float, created_at
@@ -784,7 +783,6 @@ def _check_daily_spend(providers: dict, pg_env: dict) -> dict:
                     result["daily_usd"] = daily
                     result["over_budget"] = daily > _DAILY_BUDGET_USD
 
-                # Persist current snapshot (keep only ~96 rows / 24h worth at 15-min cadence)
                 cur.execute(
                     """
                     INSERT INTO rag_documents
@@ -797,7 +795,6 @@ def _check_daily_spend(providers: dict, pg_env: dict) -> dict:
                         now, now,
                     ),
                 )
-                # Prune old snapshots beyond 25 hours
                 cur.execute(
                     """
                     DELETE FROM rag_documents
@@ -808,7 +805,6 @@ def _check_daily_spend(providers: dict, pg_env: dict) -> dict:
     except Exception:
         pass
     return result
-
 
 def main():
     snapshot = load_snapshot()
@@ -836,12 +832,12 @@ def main():
     spend = _check_daily_spend(status["providers"], pg_env)
     if spend["over_budget"]:
         msg = (
-            f"⚠️ OpenRouter daily spend ${spend['daily_usd']:.2f} exceeds "
+            f"\u26a0\ufe0f OpenRouter daily spend ${spend['daily_usd']:.2f} exceeds "
             f"${_DAILY_BUDGET_USD:.2f} budget. Review usage at https://openrouter.ai/settings/credits"
         )
         recommendations.insert(0, msg)
         severity = "warn" if severity == "info" else severity
-        _send_telegram_alert(msg, pg_env)
+        send_telegram(msg, "warn", pg_env=pg_env)
     elif spend["daily_usd"] is not None and spend["daily_usd"] > _DAILY_BUDGET_USD * 0.7:
         recommendations.append(
             f"OpenRouter daily spend ${spend['daily_usd']:.2f} approaching ${_DAILY_BUDGET_USD:.2f} limit."

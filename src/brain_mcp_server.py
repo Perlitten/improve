@@ -4,12 +4,14 @@ import os
 import base64
 import re
 import subprocess
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib import request
 
 import psycopg2
+from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import Json, RealDictCursor
 from fastmcp import FastMCP
 
@@ -17,7 +19,6 @@ import sys
 
 sys.path.insert(0, "/usr/local/bin")
 from canonical_memory import ensure_project, ensure_schema, ensure_workspace, record_insight  # noqa: E402
-from hermes_core.db import db_conn, get_conn, put_conn  # noqa: E402
 
 
 WORKSPACE = Path("/home/Bilirubin/workspace")
@@ -41,6 +42,7 @@ ALLOWED_SERVICES = {
 }
 
 SECRET_MARKERS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "PASS", "PRIVATE", "ENCRYPTION", "CREDENTIAL")
+_PG_POOLS: dict[tuple[str, str, int, str, str], ThreadedConnectionPool] = {}
 
 
 mcp = FastMCP(
@@ -67,9 +69,11 @@ def read_env(path: Path) -> dict[str, str]:
 
 def redact_text(value: str) -> str:
     text = str(value or "")
-    text = re.sub(r"sk-[A-Za-z0-9_-]{12,}", "sk-***", text)
     text = re.sub(r"sk-or-v1-[A-Za-z0-9_-]{12,}", "sk-or-v1-***", text)
+    text = re.sub(r"sk-[A-Za-z0-9_-]{12,}", "sk-***", text)
     text = re.sub(r"\b\d{8,12}:[A-Za-z0-9_-]{20,}\b", "***telegram-token***", text)
+    text = re.sub(r"(?i)\b(postgres(?:ql)?|mysql|redis)://[^\s'\"]+", r"\1://***", text)
+    text = re.sub(r"(?i)(password|token|secret|api[_-]?key|encryption[_-]?key|client[_-]?secret|refresh[_-]?token)=([^\\s]+)", r"\1=***", text)
     text = re.sub(r"(?i)(password|token|secret|api[_-]?key|encryption[_-]?key)=([^\\s]+)", r"\1=***", text)
     return text
 
@@ -101,43 +105,42 @@ def run_json_script(script: str, payload: dict[str, Any], timeout: int) -> dict[
         return {"ok": False, "error": "invalid_script_json", "detail": redact_text(str(exc)), "stdout": result["stdout"]}
 
 
-def pg_conn(dbname: str = "rag"):
-    """Return a connection for dbname.
-
-    'rag' DB: borrowed from the shared ThreadedConnectionPool (efficient for
-    the long-running brain-mcp service). Other DBs: fresh connection.
-    Callers use this as a context manager (`with pg_conn() as conn`); the pool
-    version returns a _PooledConnCtx wrapper that auto-returns to the pool.
-    """
-    if dbname == "rag":
-        return _PooledConnCtx()
+def _get_pg_pool(dbname: str = "rag") -> ThreadedConnectionPool:
     env = read_env(AUTOMATION_ENV)
-    return psycopg2.connect(
-        host="127.0.0.1",
-        port=5432,
-        dbname=dbname,
-        user=env["POSTGRES_USER"],
-        password=env["POSTGRES_PASSWORD"],
+    key = (
+        env.get("POSTGRES_HOST", "127.0.0.1"),
+        env.get("POSTGRES_USER", ""),
+        int(env.get("POSTGRES_PORT", 5432)),
+        dbname,
+        env.get("POSTGRES_PASSWORD", ""),
     )
+    pool = _PG_POOLS.get(key)
+    if pool is None:
+        pool = ThreadedConnectionPool(
+            minconn=2,
+            maxconn=int(os.getenv("HERMES_PG_POOL_MAXCONN", "20")),
+            host=key[0],
+            port=key[2],
+            dbname=dbname,
+            user=env["POSTGRES_USER"],
+            password=env["POSTGRES_PASSWORD"],
+        )
+        _PG_POOLS[key] = pool
+    return pool
 
 
-class _PooledConnCtx:
-    """Context manager that borrows a connection from the pool and returns it."""
-    def __init__(self):
-        self._conn = None
-
-    def __enter__(self):
-        self._conn = get_conn()
-        return self._conn
-
-    def __exit__(self, exc_type, *_):
-        if self._conn is not None:
-            if exc_type:
-                self._conn.rollback()
-            else:
-                self._conn.commit()
-            put_conn(self._conn)
-            self._conn = None
+@contextmanager
+def pg_conn(dbname: str = "rag"):
+    pool = _get_pg_pool(dbname)
+    conn = pool.getconn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        pool.putconn(conn)
 
 
 def http_get(url: str, timeout: int = 10) -> dict[str, Any]:
