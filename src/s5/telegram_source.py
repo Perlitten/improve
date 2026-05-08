@@ -38,13 +38,21 @@ def _read_env(path: Path) -> dict[str, str]:
 
 
 def _load_credentials() -> tuple[str, str]:
-    """Возвращает (token, chat_id) из env-файлов или переменных окружения."""
+    """Возвращает (token, chat_id) из env-файлов или переменных окружения.
+
+    Использует RALPH_TG_BOT_TOKEN (отдельный бот для Ralph), а НЕ
+    TELEGRAM_BOT_TOKEN (который принадлежит Hermes-gateway).
+    Если RALPH_TG_BOT_TOKEN не задан — TelegramSource не стартует и
+    Hermes продолжает получать все апдейты от своего бота.
+    """
     env: dict[str, str] = {}
     for p in ("/srv/automation/.env", str(Path.home() / ".hermes/.env")):
         env.update(_read_env(Path(p)))
     env.update(os.environ)
-    token = env.get("TELEGRAM_BOT_TOKEN", "")
-    chat_id = env.get("TELEGRAM_HOME_CHANNEL", "")
+    # Намеренно используем отдельный токен для Ralph,
+    # чтобы не конкурировать с Hermes за getUpdates на одном боте.
+    token = env.get("RALPH_TG_BOT_TOKEN", "")
+    chat_id = env.get("RALPH_TG_CHAT_ID") or env.get("TELEGRAM_HOME_CHANNEL", "")
     return token, chat_id
 
 
