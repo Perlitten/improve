@@ -5,6 +5,8 @@ After=network-online.target hermes-gateway.service
 Wants=network-online.target
 # Не Requires — Ralph должен стартовать даже если gateway временно недоступен.
 # ResourceGuard внутри Runner сам решит когда начинать работу.
+StartLimitBurst=3
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
@@ -18,8 +20,6 @@ Environment=PATH=/home/Bilirubin/.hermes/venv/bin:/usr/local/sbin:/usr/local/bin
 ExecStart=/home/Bilirubin/.hermes/venv/bin/python3 -m ralph.runner
 Restart=on-failure
 RestartSec=30
-StartLimitBurst=3
-StartLimitIntervalSec=300
 # Graceful stop: ждём до 5 мин чтобы Ralph закончил текущую задачу
 TimeoutStopSec=300
 NoNewPrivileges=true

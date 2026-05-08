@@ -148,7 +148,8 @@ class RalphRunner:
 
         task_id = str(task.get("id") or task.get("task_id") or "?")
         message = self._extract_message(task)
-        priority = str(task.get("priority") or task.get("priority_text") or "normal")
+        # prefer priority_text (string like "normal") over priority (int 1-10)
+        priority = str(task.get("priority_text") or task.get("priority") or "normal")
 
         log.info("Ralph: dequeued task_id=%s priority=%s", task_id, priority)
 

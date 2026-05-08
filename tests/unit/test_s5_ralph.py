@@ -105,10 +105,12 @@ class TestTelegramNotifier:
 
     def test_from_env_returns_none_without_token(self):
         from ralph.notifier import TelegramNotifier
-        with patch.dict("os.environ", {}, clear=True):
+        # Provide HOME/USERPROFILE so Path.home() doesn't raise on Windows/CI
+        fake_home = {"HOME": "/tmp/fakehome", "USERPROFILE": "/tmp/fakehome",
+                     "HOMEDRIVE": "C:", "HOMEPATH": "\\tmp\\fakehome"}
+        with patch.dict("os.environ", fake_home, clear=True):
             with patch("ralph.notifier._read_env", return_value={}):
-                with patch("ralph.notifier.Path.home", return_value=Path("/tmp/fakehome")):
-                    result = TelegramNotifier.from_env()
+                result = TelegramNotifier.from_env()
         assert result is None
 
     def test_trunc_shortens_long_text(self):
