@@ -577,153 +577,118 @@ def notion_status() -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Ralph / Inbox MCP tools
-# ---------------------------------------------------------------------------
-
 @mcp.tool
 def inbox_enqueue(
     message: str,
     source: str = "mcp",
-    priority: int = 5,
-    metadata: dict[str, Any] | None = None,
+    priority: str = "normal",
+    metadata: dict | None = None,
 ) -> dict[str, Any]:
-    """
-    Submit a task to agent_inbox for Ralph to process autonomously.
+    """Submit a task to the Ralph autonomous runner via SourceRouter.
 
-    priority: 1-10 where 1=critical, 3-4=high, 5-6=normal, 7-10=low.
-    Ralph processes only low/normal (7-10, 5-6) without human approval.
-    critical/high tasks will be paused and you will be notified via Telegram.
+    Returns the inbox task id, or null if the message was a duplicate.
     """
+    import sys as _sys
+    _sys.path.insert(0, str(WORKSPACE / "hermes" / "src"))
     try:
-        import sys as _sys
-        for _p in ("/home/Bilirubin/workspace/hermes/src", "/srv/automation/bin"):
-            if _p not in _sys.path:
-                _sys.path.insert(0, _p)
-        from task_orchestrator_v2 import TaskOrchestrator
-        from s5.source_router import SourceRouter
+        from task_orchestrator_v2 import TaskOrchestrator  # type: ignore
+        from s5.source_router import SourceRouter  # type: ignore
 
-        orch = TaskOrchestrator()
+        db_url = read_env(HERMES_ENV).get("DATABASE_URL", "")
+        # Parse db_url → dbname for orchestrator
+        import re as _re
+        m = _re.search(r"/([^/?]+)(\?|$)", db_url)
+        dbname = m.group(1) if m else "rag"
+
+        orch = TaskOrchestrator(dbname=dbname)
         router = SourceRouter(orch)
-        safe_priority = max(1, min(10, int(priority)))
-        inbox_id = router.submit(
-            message=str(message or "").strip(),
-            source=f"mcp:{source}",
-            priority=safe_priority,
-            metadata=metadata or {},
-        )
-        return {
-            "ok": inbox_id is not None,
-            "inbox_id": inbox_id,
-            "duplicate": inbox_id is None,
-            "priority": safe_priority,
-            "autonomous": safe_priority >= 5,  # low/normal → Ralph processes
-        }
+        task_id = router.submit(message, source=source, priority=priority, metadata=metadata or {})
+        return {"ok": True, "task_id": task_id, "queued": task_id is not None}
     except Exception as exc:
-        return {"ok": False, "error": redact_text(str(exc))}
+        return {"ok": False, "error": str(exc)}
 
 
 @mcp.tool
-def inbox_status(task_id: str | None = None, limit: int = 10) -> dict[str, Any]:
-    """
-    Get status of tasks in agent_inbox / agent_tasks.
+def inbox_status(task_id: str | None = None, limit: int = 20) -> dict[str, Any]:
+    """Query status of Ralph task(s).
 
-    If task_id is provided — returns single task detail.
-    Otherwise returns the most recent N tasks (max 50).
+    Pass task_id to look up a specific task, or omit to list the latest `limit` tasks.
     """
+    import sys as _sys
+    _sys.path.insert(0, str(WORKSPACE / "hermes" / "src"))
     try:
-        import sys as _sys
-        for _p in ("/home/Bilirubin/workspace/hermes/src", "/srv/automation/bin"):
-            if _p not in _sys.path:
-                _sys.path.insert(0, _p)
-        from task_orchestrator_v2 import TaskOrchestrator
+        from task_orchestrator_v2 import get_db_connection  # type: ignore
 
-        orch = TaskOrchestrator()
-        if task_id:
-            task = orch.get_task_status(str(task_id).strip())
-            return {"ok": bool(task), "task": task}
-
-        safe_limit = max(1, min(int(limit), 50))
-        with pg_conn("rag") as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            if task_id:
                 cur.execute(
-                    """
-                    SELECT t.id, t.title, t.status, t.created_at, t.updated_at,
-                           i.source, i.priority,
-                           left(i.raw_text, 200) AS message_preview
-                    FROM agent_tasks t
-                    LEFT JOIN agent_inbox i ON i.active_task_id = t.id
-                    ORDER BY t.created_at DESC
-                    LIMIT %s
-                    """,
-                    (safe_limit,),
+                    """SELECT t.id, i.raw_text, t.status, t.priority,
+                              t.result_text, t.error_text, t.created_at, t.updated_at
+                       FROM agent_tasks t
+                       LEFT JOIN agent_inbox i ON i.id = t.id
+                       WHERE t.id = %s""",
+                    (task_id,),
                 )
-                rows = cur.fetchall()
-        return {
-            "ok": True,
-            "count": len(rows),
-            "tasks": [dict(r) for r in rows],
-        }
+            else:
+                cur.execute(
+                    """SELECT t.id, i.raw_text, t.status, t.priority,
+                              t.result_text, t.error_text, t.created_at, t.updated_at
+                       FROM agent_tasks t
+                       LEFT JOIN agent_inbox i ON i.id = t.id
+                       ORDER BY t.created_at DESC LIMIT %s""",
+                    (limit,),
+                )
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            for k in ("created_at", "updated_at"):
+                if r.get(k):
+                    r[k] = r[k].isoformat()
+        return {"ok": True, "tasks": rows, "count": len(rows)}
     except Exception as exc:
-        return {"ok": False, "error": redact_text(str(exc))}
+        return {"ok": False, "error": str(exc)}
 
 
 @mcp.tool
 def ralph_status() -> dict[str, Any]:
-    """
-    Check Ralph runner health: service status, queue depth, task counts by status.
-    """
+    """Report Ralph runner status: systemd state, queue depth, task counts by status."""
+    import subprocess as _sp
+    import sys as _sys
+    _sys.path.insert(0, str(WORKSPACE / "hermes" / "src"))
+
+    # systemd state
     try:
-        import sys as _sys
-        import subprocess as _sp
-        for _p in ("/home/Bilirubin/workspace/hermes/src", "/srv/automation/bin"):
-            if _p not in _sys.path:
-                _sys.path.insert(0, _p)
-        from task_orchestrator_v2 import TaskOrchestrator
+        active = _sp.check_output(
+            ["systemctl", "is-active", "ralph"], text=True, stderr=_sp.DEVNULL
+        ).strip()
+    except Exception:
+        active = "unknown"
 
-        # systemctl is-active ralph
-        try:
-            proc = _sp.run(
-                ["systemctl", "is-active", "ralph"],
-                capture_output=True, text=True, timeout=5,
+    # queue metrics
+    try:
+        from task_orchestrator_v2 import get_db_connection  # type: ignore
+
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT status, COUNT(*) FROM agent_tasks GROUP BY status")
+            by_status = {row[0]: row[1] for row in cur.fetchall()}
+            cur.execute(
+                "SELECT COUNT(*) FROM agent_tasks WHERE status IN ('pending','retry')"
             )
-            svc_status = proc.stdout.strip() or "unknown"
-        except Exception:
-            svc_status = "unknown"
-
-        orch = TaskOrchestrator()
-        depth = orch.get_queue_depth()
-
-        with pg_conn("rag") as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT status, count(*)::int AS count
-                    FROM agent_tasks
-                    GROUP BY status
-                    ORDER BY status
-                    """
-                )
-                by_status = [dict(r) for r in cur.fetchall()]
-
-                cur.execute(
-                    """
-                    SELECT count(*)::int FROM agent_inbox
-                    WHERE status = 'new'
-                    """
-                )
-                inbox_new = (cur.fetchone() or {}).get("count", 0)
-
-        return {
-            "ok": True,
-            "ralph_service": svc_status,
-            "ralph_running": svc_status == "active",
-            "queue_depth": depth,
-            "inbox_new": inbox_new,
-            "tasks_by_status": by_status,
-        }
+            queue_depth = cur.fetchone()[0]
     except Exception as exc:
-        return {"ok": False, "error": redact_text(str(exc))}
+        by_status = {}
+        queue_depth = -1
+        active = f"{active} (db_error: {exc})"
+
+    return {
+        "ok": True,
+        "service_state": active,
+        "running": active == "active",
+        "queue_depth": queue_depth,
+        "tasks_by_status": by_status,
+    }
 
 
 if __name__ == "__main__":

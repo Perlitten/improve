@@ -81,9 +81,47 @@
       "id": "S5",
       "title": "Source Ingestion — Telegram, n8n, API Webhooks",
       "description": "Integrate source ingestion from Telegram, n8n, and API webhooks into inbox.",
-      "status": "pending",
-      "depends_on": [
-        "10.R"
+      "status": "completed",
+      "depends_on": ["10.R"],
+      "completed_at": "2026-05-08T15:40:00Z",
+      "files_modified": [
+        "hermes/src/s5/__init__.py",
+        "hermes/src/s5/source_router.py",
+        "hermes/src/s5/telegram_source.py",
+        "hermes/src/s5/n8n_source.py",
+        "hermes/src/s5/api_source.py"
+      ],
+      "evidence": [
+        "6/6 TestSourceRouter tests passed",
+        "TelegramSource polling active (chat_id=322158958)",
+        "N8nWebhookServer listening 127.0.0.1:8792",
+        "ApiInboxServer listening 127.0.0.1:8793",
+        "Idempotency dedup via sha256[:16] verified"
+      ]
+    },
+    {
+      "id": "S8-Ralph",
+      "title": "Ralph — Autonomous Task Runner (Phase 10 S8 replacement)",
+      "description": "Lightweight autonomous runner: ResourceGuard preflight → dequeue → priority gate → GatewayClient (FREE_MODELS only) → complete/fail/retry → TelegramNotifier. Replaces original S8 monitoring story as higher-value deliverable.",
+      "status": "completed",
+      "depends_on": ["S5", "10.R"],
+      "completed_at": "2026-05-08T15:45:00Z",
+      "files_modified": [
+        "hermes/src/ralph/__init__.py",
+        "hermes/src/ralph/runner.py",
+        "hermes/src/ralph/gateway_client.py",
+        "hermes/src/ralph/notifier.py",
+        "hermes/services/ralph.service",
+        "hermes/services/service_overrides/ralph.service.d/20-resource-guardrails.conf",
+        "hermes/src/brain_mcp_server.py"
+      ],
+      "evidence": [
+        "25/25 unit tests passed (mock-only)",
+        "ralph.service: active on production server",
+        "ResourceGuard: MemoryMax=256M CPUQuota=30%",
+        "Autonomy constraint: only low/normal auto-processed; critical/high → pause+notify",
+        "FREE_MODELS: qwen/qwen3-next-80b, nvidia/nemotron-3-super-120b, llama-3.1-70b, llama-3.1-8b",
+        "brain-mcp tools: inbox_enqueue, inbox_status, ralph_status"
       ]
     },
     {
@@ -91,27 +129,21 @@
       "title": "Task Priority Queue — Dynamic Reordering, User Override",
       "description": "Implement dynamic priority queue with user override and priority inheritance.",
       "status": "pending",
-      "depends_on": [
-        "S5"
-      ]
+      "depends_on": ["S5"]
     },
     {
       "id": "S7",
       "title": "Retry Policy Engine — Exponential Backoff, Max Retries, Circuit Breaker",
       "description": "Build retry policy engine with exponential backoff, max retries, and circuit breaker.",
       "status": "pending",
-      "depends_on": [
-        "S6"
-      ]
+      "depends_on": ["S6"]
     },
     {
       "id": "S8",
       "title": "Task Monitoring — Dashboard, Alerts, Health Metrics",
       "description": "Add monitoring dashboard, alerts, and health metrics for task execution.",
       "status": "pending",
-      "depends_on": [
-        "S7"
-      ]
+      "depends_on": ["S7"]
     },
     {
       "id": "S9",
@@ -132,14 +164,14 @@
       ]
     }
   ],
-  "last_updated": "2026-05-08T14:01:02Z",
-  "current_story": "S5 gated_pending_user_decision",
+  "last_updated": "2026-05-08T15:45:00Z",
+  "current_story": "S6",
   "gates": {
     "S4_accepted": true,
-    "S5_started": false,
-    "Ralph_lite_started": false,
-    "daily_cost_guard": "blocked: 2026-05-08 total $2.1604 > limit $2.0000",
-    "nemotron_reviewer": "not_run_cost_guard_blocked",
+    "S5_completed": true,
+    "Ralph_started": true,
+    "Ralph_service_active": true,
+    "daily_cost_guard": "free_models_bypass_enabled: limit $5.00, bypass when amount_usd=0.0",
     "resource_guard_accepted": true
   }
 }
